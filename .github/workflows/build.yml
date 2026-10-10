@@ -135,12 +135,15 @@ jobs:
           export TMUXIDE_TMUX_VERSION=$(cat ../../vendor/tmux/out/VERSION)
           pnpm install --frozen-lockfile
           pnpm tauri build --bundles deb,appimage
+      - name: 收集安装包
+        run: |
+          mkdir -p dist
+          cp target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage dist/
+          (cd dist && sha256sum * > SHA256SUMS-linux-desktop-x86_64.txt)
       - uses: actions/upload-artifact@v4
         with:
           name: tmuxide-desktop-linux-x86_64
-          path: |
-            target/release/bundle/deb/*.deb
-            target/release/bundle/appimage/*.AppImage
+          path: dist/*
 
   macos:
     name: macOS (${{ matrix.arch }})
