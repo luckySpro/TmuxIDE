@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 发布版本号（例如 v0.1.0），留空只编译不发布
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -209,7 +214,7 @@ jobs:
 
   release:
     name: 发布 GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || startsWith(inputs.release_tag, 'v')
     needs: [linux-cli, linux-desktop, macos]
     runs-on: ubuntu-24.04
     permissions:
@@ -224,7 +229,9 @@ jobs:
       - run: ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
-          name: TmuxIDE ${{ github.ref_name }}
-          body_path: docs/release-notes/${{ github.ref_name }}.md
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: TmuxIDE ${{ inputs.release_tag || github.ref_name }}
+          body_path: docs/release-notes/${{ inputs.release_tag || github.ref_name }}.md
           fail_on_unmatched_files: true
           files: dist/*
