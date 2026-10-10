@@ -1,0 +1,226 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: 检查与测试
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: 系统依赖（tmux 用于集成测试，WebKitGTK 用于编译桌面端）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: 前端
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  linux-cli:
+    name: Linux 命令行 (${{ matrix.arch }})
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: 在 Alpine 中静态编译 tmux 与 tmuxide，并在无 tmux、无 git 的环境中冒烟测试
+        run: |
+          docker run --rm -v "$PWD":/src -w /src -e ARCH=${{ matrix.arch }} alpine:3.20 sh -euc '
+            apk add --no-cache bash curl build-base perl linux-headers file >/dev/null
+            vendor/tmux/build.sh
+            curl -sSf https://sh.rustup.rs | sh -s -- -y -q --profile minimal --default-toolchain stable
+            . "$HOME/.cargo/env"
+            export TMUXIDE_TMUX_BIN=$PWD/vendor/tmux/out/tmux-linux-$ARCH
+            export TMUXIDE_TMUX_VERSION=$(cat vendor/tmux/out/VERSION)
+            cargo build --release --locked -p tmuxide-cli
+            file target/release/tmuxide
+            if command -v git || command -v tmux; then echo "测试环境不应有系统 git/tmux"; exit 1; fi
+            scripts/smoke.sh target/release/tmuxide
+          '
+      - name: 打包
+        run: |
+          V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          D=tmuxide-$V-linux-${{ matrix.arch }}
+          mkdir -p dist/$D/licenses
+          cp target/release/tmuxide README.md LICENSE dist/$D/
+          cp vendor/tmux/out/licenses/* dist/$D/licenses/
+          tar -C dist -czf dist/$D.tar.gz $D
+          (cd dist && sha256sum $D.tar.gz > $D.tar.gz.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tmuxide-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tmux-linux-${{ matrix.arch }}
+          path: vendor/tmux/out
+          retention-days: 7
+
+  linux-desktop:
+    name: Linux 桌面版 (x86_64)
+    needs: linux-cli
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tmux-linux-x86_64
+          path: vendor/tmux/out
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 打包 deb 与 AppImage
+        working-directory: apps/desktop
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          chmod +x ../../vendor/tmux/out/tmux-linux-x86_64
+          export TMUXIDE_TMUX_BIN=$GITHUB_WORKSPACE/vendor/tmux/out/tmux-linux-x86_64
+          export TMUXIDE_TMUX_VERSION=$(cat ../../vendor/tmux/out/VERSION)
+          pnpm install --frozen-lockfile
+          pnpm tauri build --bundles deb,appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tmuxide-desktop-linux-x86_64
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            target: x86_64-apple-darwin
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: 编译内置 tmux
+        run: ARCH=${{ matrix.arch }} vendor/tmux/build.sh
+      - name: 前端
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
+      - name: 命令行
+        run: |
+          export TMUXIDE_TMUX_BIN=$PWD/vendor/tmux/out/tmux-macos-${{ matrix.arch }}
+          export TMUXIDE_TMUX_VERSION=$(cat vendor/tmux/out/VERSION)
+          cargo build --release --locked -p tmuxide-cli --target ${{ matrix.target }}
+          BIN=target/${{ matrix.target }}/release/tmuxide
+          otool -L $BIN
+          if otool -L $BIN | tail -n +2 | grep -vE '^\s+/(usr/lib|System/Library)/'; then echo "链接了非系统库"; exit 1; fi
+      - name: 冒烟测试
+        if: matrix.arch == 'arm64'
+        run: scripts/smoke.sh target/${{ matrix.target }}/release/tmuxide
+      - name: 桌面版（.app / .dmg）
+        working-directory: apps/desktop
+        env:
+          CI: 'true'
+        run: |
+          export TMUXIDE_TMUX_BIN=$GITHUB_WORKSPACE/vendor/tmux/out/tmux-macos-${{ matrix.arch }}
+          export TMUXIDE_TMUX_VERSION=$(cat ../../vendor/tmux/out/VERSION)
+          pnpm install --frozen-lockfile
+          pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg
+      - name: 打包
+        run: |
+          V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          D=tmuxide-$V-macos-${{ matrix.arch }}
+          mkdir -p dist/$D/licenses
+          cp target/${{ matrix.target }}/release/tmuxide README.md LICENSE dist/$D/
+          cp vendor/tmux/out/licenses/* dist/$D/licenses/
+          tar -C dist -czf dist/$D.tar.gz $D
+          cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/
+          (cd dist && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS-macos-${{ matrix.arch }}.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tmuxide-macos-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.dmg
+            dist/*.txt
+
+  release:
+    name: 发布 GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux-cli, linux-desktop, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tmuxide-*
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/*

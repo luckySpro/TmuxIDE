@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tmuxide-core",
+    "crates/tmuxide-tmux",
+    "crates/tmuxide-git",
+    "crates/tmuxide-server",
+    "apps/cli",
+    "apps/desktop/src-tauri",
+]
+default-members = [
+    "crates/tmuxide-core",
+    "crates/tmuxide-tmux",
+    "crates/tmuxide-git",
+    "crates/tmuxide-server",
+    "apps/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["M&J Group <473276@qq.com>"]
+license = "MIT"
+repository = "https://github.com/luckySpro/TmuxIDE"
+
+[workspace.dependencies]
+tmuxide-core = { path = "crates/tmuxide-core" }
+tmuxide-tmux = { path = "crates/tmuxide-tmux" }
+tmuxide-git = { path = "crates/tmuxide-git" }
+tmuxide-server = { path = "crates/tmuxide-server" }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+regex = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "6"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

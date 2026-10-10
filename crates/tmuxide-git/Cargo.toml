@@ -1,0 +1,19 @@
+[package]
+name = "tmuxide-git"
+description = "TmuxIDE Git adapter built on statically linked libgit2 (no system git required)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+similar = "2"
+# libgit2、libssh2、OpenSSL 全部静态编译进二进制，运行时不需要系统 git 或 Homebrew 库
+git2 = { version = "0.20", default-features = false, features = ["https", "ssh", "vendored-libgit2", "vendored-openssl"] }
+libz-sys = { version = "1", features = ["static"] }
+
+[dev-dependencies]
+tempfile.workspace = true

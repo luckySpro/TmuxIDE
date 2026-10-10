@@ -1,0 +1,22 @@
+[package]
+name = "tmuxide-cli"
+description = "TmuxIDE command line: save/restore/sync tmux sessions and serve the web UI"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tmuxide"
+path = "src/main.rs"
+
+[dependencies]
+tmuxide-server.workspace = true
+tmuxide-tmux.workspace = true
+tmuxide-git.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap = { version = "4", features = ["derive"] }

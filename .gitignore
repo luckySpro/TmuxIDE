@@ -1,0 +1,8 @@
+/target
+node_modules/
+web/dist/
+apps/desktop/src-tauri/gen/
+vendor/tmux/build/
+vendor/tmux/out/
+*.log
+.DS_Store

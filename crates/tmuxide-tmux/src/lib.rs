@@ -1,0 +1,374 @@
+//! tmux 适配层：定位（或释放）内置 tmux，使用专用 socket 执行命令，解析会话结构，保存与恢复。
+//!
+//! 所有命令都以参数数组调用，不经过 shell 拼接。
+
+mod bundled;
+mod parse;
+mod ps;
+mod restore;
+
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
+
+use serde::Serialize;
+use tmuxide_core::{
+    collapse_home, is_shell, valid_session_name, PaneSnapshot, SessionSnapshot, WindowSnapshot, SNAPSHOT_VERSION,
+};
+
+pub use bundled::{bundled_version, has_bundled};
+pub use parse::{PaneInfo, SessionInfo, WindowInfo};
+
+#[derive(Debug, thiserror::Error)]
+pub enum TmuxError {
+    #[error("找不到 tmux：{0}")]
+    NotFound(String),
+    #[error("无法执行 tmux：{0}")]
+    Io(#[from] std::io::Error),
+    #[error("tmux 返回错误：{0}")]
+    Command(String),
+    #[error("会话名 {0:?} 不合法（只能包含字母、数字、- 和 _）")]
+    BadName(String),
+    #[error("会话 {0} 不存在")]
+    NoSession(String),
+    #[error("会话 {0} 已存在")]
+    Exists(String),
+    #[error("快照无效：{0}")]
+    Snapshot(#[from] tmuxide_core::CoreError),
+}
+
+pub type Result<T> = std::result::Result<T, TmuxError>;
+
+#[derive(Debug, Clone)]
+pub struct TmuxOptions {
+    /// 应用数据目录：内置 tmux 释放到其下 `bin/`，生成的 tmux 配置放在这里
+    pub data_dir: PathBuf,
+    /// 为 true 时使用 PATH 中的系统 tmux
+    pub use_system: bool,
+    /// tmux `-L` socket 名
+    pub socket: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TmuxInfo {
+    pub path: String,
+    pub version: String,
+    pub bundled: bool,
+    pub socket: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tmux {
+    bin: PathBuf,
+    socket: String,
+    conf: PathBuf,
+    bundled: bool,
+    version: String,
+}
+
+impl Tmux {
+    pub fn new(opts: &TmuxOptions) -> Result<Tmux> {
+        std::fs::create_dir_all(&opts.data_dir)?;
+        let (bin, bundled) = if !opts.use_system && has_bundled() {
+            (bundled::extract(&opts.data_dir.join("bin"))?, true)
+        } else {
+            (
+                find_in_path("tmux")
+                    .ok_or_else(|| TmuxError::NotFound("此版本未内置 tmux，且系统 PATH 中没有 tmux".into()))?,
+                false,
+            )
+        };
+        let conf = opts.data_dir.join("tmux.conf");
+        write_if_changed(&conf, DEFAULT_CONF)?;
+        let mut t = Tmux {
+            bin,
+            socket: opts.socket.clone(),
+            conf,
+            bundled,
+            version: String::new(),
+        };
+        t.version = t.raw(&["-V"])?.trim().trim_start_matches("tmux ").to_string();
+        Ok(t)
+    }
+
+    pub fn info(&self) -> TmuxInfo {
+        TmuxInfo {
+            path: self.bin.display().to_string(),
+            version: self.version.clone(),
+            bundled: self.bundled,
+            socket: self.socket.clone(),
+        }
+    }
+
+    pub fn bin(&self) -> &Path {
+        &self.bin
+    }
+
+    /// 带 socket、配置文件和 UTF-8 标志的基础命令
+    fn base(&self) -> Command {
+        let mut c = Command::new(&self.bin);
+        c.arg("-u").arg("-L").arg(&self.socket).arg("-f").arg(&self.conf);
+        c.envs(self.extra_env());
+        c.stdin(Stdio::null());
+        c
+    }
+
+    /// 运行内置 tmux 时需要补充的环境变量。
+    ///
+    /// Linux 版 tmux 在 Alpine 中静态编译，默认只查找 Alpine 的 terminfo 路径；
+    /// 补上 Debian/Ubuntu 等发行版使用的位置。
+    pub fn extra_env(&self) -> Vec<(String, String)> {
+        let mut env = Vec::new();
+        if self.bundled && cfg!(target_os = "linux") && std::env::var_os("TERMINFO_DIRS").is_none() {
+            env.push((
+                "TERMINFO_DIRS".into(),
+                "/etc/terminfo:/lib/terminfo:/usr/share/terminfo:/usr/lib/terminfo".into(),
+            ));
+        }
+        env
+    }
+
+    /// 交互 attach 使用的程序与参数（交给 PTY 执行）
+    pub fn attach_argv(&self, session: &str) -> (PathBuf, Vec<String>) {
+        (
+            self.bin.clone(),
+            vec![
+                "-u".into(),
+                "-L".into(),
+                self.socket.clone(),
+                "-f".into(),
+                self.conf.display().to_string(),
+                "attach-session".into(),
+                "-t".into(),
+                format!("={session}"),
+            ],
+        )
+    }
+
+    /// 透传任意参数（CLI `tmuxide tmux ...` 使用）
+    pub fn passthrough_command<I, S>(&self, args: I) -> Command
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut c = Command::new(&self.bin);
+        c.arg("-u")
+            .arg("-L")
+            .arg(&self.socket)
+            .arg("-f")
+            .arg(&self.conf)
+            .args(args);
+        c.envs(self.extra_env());
+        c
+    }
+
+    fn raw(&self, args: &[&str]) -> Result<String> {
+        let out = Command::new(&self.bin)
+            .args(args)
+            .envs(self.extra_env())
+            .stdin(Stdio::null())
+            .output()?;
+        if !out.status.success() {
+            return Err(TmuxError::Command(
+                String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// 执行 tmux 子命令，返回标准输出
+    pub fn run(&self, args: &[&str]) -> Result<String> {
+        tracing::debug!(?args, "tmux");
+        let out = self.base().args(args).output()?;
+        if !out.status.success() {
+            return Err(TmuxError::Command(
+                String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// 列出所有会话及其窗口和面板；server 未运行时返回空列表
+    pub fn sessions(&self) -> Result<Vec<SessionInfo>> {
+        match self.run(&["list-panes", "-a", "-F", parse::PANE_FORMAT]) {
+            Ok(text) => Ok(parse::parse_panes(&text)),
+            Err(TmuxError::Command(msg)) if is_no_server(&msg) => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn session(&self, name: &str) -> Result<SessionInfo> {
+        self.sessions()?
+            .into_iter()
+            .find(|s| s.name == name)
+            .ok_or_else(|| TmuxError::NoSession(name.to_string()))
+    }
+
+    pub fn has_session(&self, name: &str) -> bool {
+        self.run(&["has-session", "-t", &format!("={name}")]).is_ok()
+    }
+
+    pub fn new_session(&self, name: &str, cwd: Option<&Path>) -> Result<()> {
+        check_name(name)?;
+        if self.has_session(name) {
+            return Err(TmuxError::Exists(name.to_string()));
+        }
+        let cwd = cwd.map(|p| p.display().to_string()).unwrap_or_else(home_string);
+        self.run(&["new-session", "-d", "-s", name, "-c", &cwd, "-x", "200", "-y", "50"])?;
+        Ok(())
+    }
+
+    pub fn kill_session(&self, name: &str) -> Result<()> {
+        self.run(&["kill-session", "-t", &format!("={name}")]).map(|_| ())
+    }
+
+    pub fn rename_session(&self, from: &str, to: &str) -> Result<()> {
+        check_name(to)?;
+        if self.has_session(to) {
+            return Err(TmuxError::Exists(to.to_string()));
+        }
+        self.run(&["rename-session", "-t", &format!("={from}"), to]).map(|_| ())
+    }
+
+    pub fn new_window(&self, session: &str, name: Option<&str>) -> Result<()> {
+        let target = format!("={session}:");
+        let mut args = vec!["new-window", "-t", &target];
+        if let Some(n) = name.filter(|n| !n.is_empty()) {
+            args.extend(["-n", n]);
+        }
+        // 新窗口沿用当前活动面板目录
+        args.extend(["-c", "#{pane_current_path}"]);
+        self.run(&args).map(|_| ())
+    }
+
+    pub fn select_window(&self, window_id: &str) -> Result<()> {
+        self.run(&["select-window", "-t", window_id]).map(|_| ())
+    }
+
+    pub fn kill_window(&self, window_id: &str) -> Result<()> {
+        self.run(&["kill-window", "-t", window_id]).map(|_| ())
+    }
+
+    pub fn rename_window(&self, window_id: &str, name: &str) -> Result<()> {
+        self.run(&["rename-window", "-t", window_id, name]).map(|_| ())
+    }
+
+    /// 抓取面板滚动缓冲区（纯文本）
+    pub fn capture(&self, pane_id: &str, lines: u32) -> Result<String> {
+        let start = format!("-{lines}");
+        self.run(&["capture-pane", "-p", "-J", "-S", &start, "-t", pane_id])
+    }
+
+    /// 把运行中的会话描述为快照
+    pub fn snapshot(&self, name: &str, host: &str, saved_at: &str) -> Result<SessionSnapshot> {
+        let info = self.session(name)?;
+        let home = home_dir();
+        let procs = ps::ProcessTable::load();
+        let windows = info
+            .windows
+            .iter()
+            .map(|w| WindowSnapshot {
+                index: w.index,
+                name: w.name.clone(),
+                layout: w.layout.clone(),
+                active: w.active,
+                panes: w
+                    .panes
+                    .iter()
+                    .map(|p| PaneSnapshot {
+                        index: p.index,
+                        cwd: collapse_home(&p.cwd, home.as_deref()),
+                        cmd: if is_shell(&p.command) {
+                            None
+                        } else {
+                            procs
+                                .as_ref()
+                                .and_then(|t| t.foreground_args(p.pid))
+                                .or_else(|| Some(p.command.clone()))
+                                .filter(|c| !c.is_empty())
+                        },
+                        active: p.active,
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        let root = windows.first().and_then(|w| w.panes.first()).map(|p| p.cwd.clone());
+        let snap = SessionSnapshot {
+            version: SNAPSHOT_VERSION,
+            name: info.name.clone(),
+            host: host.to_string(),
+            saved_at: saved_at.to_string(),
+            root,
+            windows,
+        };
+        snap.validate()?;
+        Ok(snap)
+    }
+
+    /// 按快照恢复为名为 `target` 的会话
+    pub fn restore(&self, snap: &SessionSnapshot, target: &str, run_commands: bool) -> Result<restore::RestoreReport> {
+        check_name(target)?;
+        snap.validate()?;
+        if self.has_session(target) {
+            return Err(TmuxError::Exists(target.to_string()));
+        }
+        restore::execute(self, snap, target, run_commands)
+    }
+}
+
+pub use restore::RestoreReport;
+
+const DEFAULT_CONF: &str = r#"# 由 TmuxIDE 生成：基础设置，随后加载用户自己的配置
+set -g default-terminal "screen-256color"
+set -g mouse on
+set -g history-limit 10000
+set -g base-index 1
+setw -g pane-base-index 0
+source-file -q ~/.tmux.conf
+source-file -q ~/.config/tmux/tmux.conf
+"#;
+
+fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
+    if std::fs::read_to_string(path).ok().as_deref() != Some(content) {
+        std::fs::write(path, content)?;
+    }
+    Ok(())
+}
+
+fn is_no_server(msg: &str) -> bool {
+    msg.contains("no server running")
+        || msg.contains("error connecting to")
+        || msg.contains("No such file or directory")
+}
+
+fn check_name(name: &str) -> Result<()> {
+    if valid_session_name(name) {
+        Ok(())
+    } else {
+        Err(TmuxError::BadName(name.to_string()))
+    }
+}
+
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+}
+
+fn home_string() -> String {
+    home_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "/".into())
+}
+
+pub fn find_in_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let mut dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    // GUI 应用启动时 PATH 很短，补充常见位置以便找到系统 tmux
+    for extra in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+        dirs.push(PathBuf::from(extra));
+    }
+    dirs.into_iter().map(|d| d.join(name)).find(|p| p.is_file())
+}

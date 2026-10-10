@@ -1,0 +1,13 @@
+[package]
+name = "tmuxide-core"
+description = "TmuxIDE domain model: session snapshots, templates, restore plans and redaction"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+regex.workspace = true
+thiserror.workspace = true

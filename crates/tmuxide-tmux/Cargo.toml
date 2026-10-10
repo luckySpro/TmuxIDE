@@ -1,0 +1,17 @@
+[package]
+name = "tmuxide-tmux"
+description = "TmuxIDE tmux adapter: bundled tmux binary, session operations, snapshot and restore"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+tmuxide-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

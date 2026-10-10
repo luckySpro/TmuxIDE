@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "界面由内置本地服务提供，不向页面开放任何 Tauri 命令",
+  "windows": ["main"],
+  "permissions": []
+}

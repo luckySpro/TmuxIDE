@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TmuxIDE",
+  "version": "0.1.0",
+  "identifier": "com.mjgroup.tmuxide",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": "pnpm --dir ../../web install --frozen-lockfile && pnpm --dir ../../web build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "deb", "appimage"],
+    "category": "DeveloperTool",
+    "publisher": "M&J Group",
+    "copyright": "© 2026 M&J Group",
+    "shortDescription": "tmux 会话管理 IDE",
+    "longDescription": "TmuxIDE：图形化管理 tmux 会话，保存、恢复并用你自己的 Git 仓库同步。内置 tmux 与 libgit2，无需额外安装依赖。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "deb": {
+        "section": "devel"
+      }
+    }
+  }
+}
