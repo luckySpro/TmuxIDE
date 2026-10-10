@@ -1,6 +1,6 @@
 # TmuxIDE 规划（v0.1 草案）
 
-> 状态：规划，尚无代码。遵循 `lucky-rust-fullstack` 技能（Rust 全栈 / Tauri 2，离线可安装、开箱即用）。
+> 状态：阶段 0–3 已实现第一版（见文末“实施进度”）。遵循 `lucky-rust-fullstack` 技能（Rust 全栈 / Tauri 2，离线可安装、开箱即用）。
 > 署名：M&J Group · 473276@qq.com
 
 ## 1. 要解决的问题
@@ -178,3 +178,19 @@ TmuxIDE/
 - 默认使用专用 tmux socket，不触碰用户现有 tmux。
 - 滚动缓冲区默认不保存，避免把敏感输出推到 Git。
 - 快照按主机分目录，模板和 tmux 配置跨机器共享。
+
+## 7. 实施进度（2026-10-10）
+
+| 阶段 | 状态 | 说明 |
+| --- | --- | --- |
+| 0 骨架与内置 tmux | 已完成 | workspace、`vendor/tmux/build.sh`（Linux musl 全静态 / macOS 仅链接系统库）、CI |
+| 1 会话管理 | 已完成 | 会话树、xterm.js 终端（PTY attach）、窗口标签、重命名/关闭、检查器 |
+| 2 保存与恢复 | 已完成 | TOML 快照、内容不变不提交、自动保存、历史版本恢复、同名冲突处理、模板、可选滚动缓冲区 + 脱敏 |
+| 3 Git 同步 | 已完成 | libgit2 静态内嵌；SSH 密钥 / ssh-agent / HTTPS Token；按主机分目录；历史与逐行对比 |
+| 4 体验完善 | 部分 | 命令面板、简体中文/英文已完成；繁中/日文、托盘、快捷键自定义、tmux.conf 编辑器待做 |
+| 5 macOS 打包 | 部分 | 未签名 DMG（arm64 / Intel）；签名公证与自动升级待做 |
+| 6 Linux 与无界面模式 | 已完成 | 静态 `tmuxide`（x86_64 / aarch64）含 Web 界面；x86_64 deb / AppImage |
+| 7 进阶 | 未开始 | control mode 原生面板渲染等 |
+
+与原计划的差异：桌面窗口和 `tmuxide serve` 共用同一个本地 HTTP/WebSocket 服务（127.0.0.1 + 随机令牌），而不是 Tauri IPC，
+这样两种形态只有一套接口。内置 tmux 直接嵌入二进制，首次运行释放到数据目录。
