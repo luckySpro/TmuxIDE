@@ -25,7 +25,7 @@
 
 Windows 不提供：tmux 无法在 Windows 上原生运行。
 
-> macOS 安装包目前未签名。首次打开请在“访达”中右键 TmuxIDE → 打开，或执行 `xattr -dr com.apple.quarantine /Applications/TmuxIDE.app`。
+> macOS 安装包没有 Apple 开发者签名。第一次打开被拦下时，到“系统设置 → 隐私与安全性”底部点“仍要打开”；或在终端执行一次 `xattr -cr /Applications/TmuxIDE.app`。
 >
 > Linux 桌面版需要系统自带的 WebKitGTK 4.1（主流桌面发行版默认已安装）。服务器或无桌面环境请使用命令行版。
 

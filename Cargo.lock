@@ -4070,7 +4070,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tmuxide-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -4085,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "tmuxide-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "regex",
  "serde",
@@ -4095,7 +4095,7 @@ dependencies = [
 
 [[package]]
 name = "tmuxide-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "tauri",
@@ -4109,7 +4109,7 @@ dependencies = [
 
 [[package]]
 name = "tmuxide-git"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "git2",
  "libz-sys",
@@ -4122,7 +4122,7 @@ dependencies = [
 
 [[package]]
 name = "tmuxide-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -4149,7 +4149,7 @@ dependencies = [
 
 [[package]]
 name = "tmuxide-tmux"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "tempfile",

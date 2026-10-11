@@ -197,6 +197,11 @@ jobs:
           export TMUXIDE_TMUX_VERSION=$(cat ../../vendor/tmux/out/VERSION)
           pnpm install --frozen-lockfile
           pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg
+      - name: 校验 .app 签名
+        run: |
+          APP=$(ls -d target/${{ matrix.target }}/release/bundle/macos/*.app)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E 'Signature=adhoc|flags='
       - name: 打包
         run: |
           V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
