@@ -89,7 +89,13 @@ CODE=$($CURL $WS -H "Origin: $URL" -H "Cookie: $COOKIE" "$URL/api/attach?session
 [ "$CODE" = 101 ] || fail "终端连接应升级为 WebSocket，实际 $CODE"
 local_api "$L/remote" | json "[e['kind'] for e in d['audit']]" | grep -q attach || fail "访问记录里没有打开终端"
 
-# 5. 移除设备后凭证立即失效
+# 5. 没有授权远程管理的设备不能使用管理接口
+CODE=$($CURL -s -o /dev/null -w '%{http_code}' -m 10 -b "$WORK/jar" "$URL/api/admin/info")
+[ "$CODE" = 403 ] || fail "未授权设备访问管理接口应返回 403，实际 $CODE"
+CODE=$($CURL -s -o /dev/null -w '%{http_code}' -m 10 "$URL/api/admin/info")
+[ "$CODE" = 401 ] || fail "未配对访问管理接口应返回 401，实际 $CODE"
+
+# 6. 移除设备后凭证立即失效
 DEV=$(local_api "$L/remote" | json "d['devices'][0]['id']")
 local_api -X DELETE "$L/remote/devices/$DEV" > /dev/null
 $CURL -fsS -m 10 -b "$WORK/jar" "$URL/api/me" | grep -q '"paired":false' || fail "移除后设备凭证仍然有效"

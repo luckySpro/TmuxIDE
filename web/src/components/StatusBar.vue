@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { api } from '../api'
+import { api, remoteAdmin } from '../api'
 import { lang, languages, t } from '../i18n'
 import { state } from '../store'
 
@@ -26,7 +26,8 @@ async function switchLang() {
     <span v-if="state.git?.has_remote" class="mono">{{ state.git.branch }} ↑{{ state.git.ahead }} ↓{{ state.git.behind }}</span>
     <span v-else>{{ t('notSynced') }}</span>
     <span class="grow" />
-    <button v-if="state.remote && state.remote.state !== 'off'" class="lang remote" :class="state.remote.state" @click="openRemote">
+    <a v-if="remoteAdmin" class="lang remote online" href="/" :title="t('backToTerminals')"><span class="dot" />{{ t('remoteAdminBar') }}</a>
+    <button v-else-if="state.remote && state.remote.state !== 'off'" class="lang remote" :class="state.remote.state" @click="openRemote">
       <span class="dot" />{{ t('remoteBar') }}<template v-if="state.remote.terminals"> · {{ t('remoteBarTerminals', { n: state.remote.terminals }) }}</template>
     </button>
     <span>{{ state.autosaveMinutes ? t('autosaveEvery', { n: state.autosaveMinutes }) : t('autosaveOff') }}</span>
@@ -42,7 +43,7 @@ async function switchLang() {
 .grow { flex: 1; }
 .lang { background: none; border: 0; color: var(--text-2); cursor: pointer; font-size: 12px; padding: 0; }
 .lang:hover { color: var(--text); }
-.remote { display: flex; align-items: center; gap: 6px; }
+.remote { text-decoration: none; display: flex; align-items: center; gap: 6px; }
 .remote .dot { width: 6px; height: 6px; background: var(--amber); }
 .remote.online .dot { background: var(--accent); }
 .remote.error .dot { background: var(--red); }

@@ -2,12 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import RemoteSettings from '../components/RemoteSettings.vue'
-import { api, type SettingsView } from '../api'
+import { api, remoteAdmin, type SettingsView } from '../api'
 import { lang, languages, t } from '../i18n'
 import { act, state, toast } from '../store'
 
 type Section = 'git' | 'save' | 'tmux' | 'remote' | 'general' | 'about'
-const section = ref<Section>(state.settingsSection === 'remote' ? 'remote' : 'git')
+const section = ref<Section>(state.settingsSection === 'remote' && !remoteAdmin ? 'remote' : 'git')
 const view = ref<SettingsView | null>(null)
 const original = ref('')
 const token = ref('')
@@ -18,7 +18,7 @@ const exclude = ref('')
 const sections: { id: Section; label: string }[] = [
   { id: 'git', label: 'git' }, { id: 'save', label: 'savePolicy' }, { id: 'tmux', label: 'tmuxConf' },
   { id: 'remote', label: 'remoteAccess' }, { id: 'general', label: 'general' }, { id: 'about', label: 'about' },
-]
+].filter((s) => !(remoteAdmin && s.id === 'remote')) as { id: Section; label: string }[]
 
 async function load() {
   const v = await api.get<SettingsView>('/settings')

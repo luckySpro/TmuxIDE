@@ -3,7 +3,12 @@
 const KEY = 'tmuxide-token'
 let token = ''
 
+/** 经远程地址打开的管理界面：凭证在 HttpOnly Cookie 里，接口在 /api/admin 下 */
+export const remoteAdmin = location.pathname.startsWith('/admin')
+const BASE = remoteAdmin ? '/api/admin' : '/api'
+
 export function captureToken() {
+  if (remoteAdmin) return
   const m = location.hash.match(/token=([0-9a-f]+)/)
   if (m) {
     token = m[1]
@@ -25,16 +30,22 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${BASE}${path}`, {
     method,
+    credentials: 'same-origin',
     headers: {
-      'x-tmuxide-token': token,
+      ...(remoteAdmin ? {} : { 'x-tmuxide-token': token }),
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   const text = await res.text()
-  const data = text ? JSON.parse(text) : null
+  let data: any = null
+  try { data = text ? JSON.parse(text) : null } catch { /* 非 JSON 错误页 */ }
+  // 远程管理：PIN 超时、权限被收回或设备被移除时回到手机页面重新验证
+  if (remoteAdmin && (res.status === 401 || res.status === 403 || res.status === 423)) {
+    location.href = '/'
+  }
   if (!res.ok) throw new ApiError(data?.error ?? `HTTP ${res.status}`, res.status)
   return data as T
 }
@@ -49,8 +60,8 @@ export const api = {
 
 export function attachUrl(session: string, cols: number, rows: number) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const q = new URLSearchParams({ session, cols: String(cols), rows: String(rows), token })
-  return `${proto}://${location.host}/api/attach?${q}`
+  const q = new URLSearchParams({ session, cols: String(cols), rows: String(rows), ...(remoteAdmin ? {} : { token }) })
+  return `${proto}://${location.host}${BASE}/attach?${q}`
 }
 
 export const enc = encodeURIComponent
@@ -87,7 +98,7 @@ export interface RemoteConfig {
   require_pin: boolean; idle_minutes: number; device_days: number; notify: boolean; allowed_emails: string[]; keep_awake: boolean
 }
 export interface ToolInfo { found: boolean; bundled: boolean; path: string; version: string }
-export interface RemoteDevice { id: string; name: string; created_at: string; last_seen: string; last_ip: string; read_only: boolean; locked: boolean; online: boolean }
+export interface RemoteDevice { id: string; name: string; created_at: string; last_seen: string; last_ip: string; read_only: boolean; admin: boolean; locked: boolean; online: boolean }
 export interface RemoteConn { id: number; device_id: string; device_name: string; ip: string; kind: 'list' | 'terminal'; target: string; started: string; enters: number }
 export interface AuditEvent { seq: number; ts: string; kind: string; device: string | null; ip: string; detail: string }
 export interface PairingView { code: string; expires_in: number; url: string | null; qr_svg: string | null }

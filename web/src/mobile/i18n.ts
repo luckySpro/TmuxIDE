@@ -13,7 +13,7 @@ const zh = {
   fitHint: '适配手机会改变电脑上这个窗口的大小', inputPlaceholder: '输入命令，回车发送', send: '发送',
   interrupt: '^C 中断', clear: '清屏', keyboard: '键盘', reconnecting: '终端已断开，正在重连…',
   ended: '会话已结束', back: '返回终端列表', readonlyNote: '这台设备是只读的，只能查看',
-  error: '出错了',
+  error: '出错了', manage: '管理',
 }
 type Key = keyof typeof zh
 const en: Record<Key, string> = {
@@ -31,7 +31,7 @@ const en: Record<Key, string> = {
   fitHint: 'Fitting resizes this window on your computer too', inputPlaceholder: 'Type a command, Enter to send', send: 'Send',
   interrupt: '^C', clear: 'Clear', keyboard: 'Keyboard', reconnecting: 'Terminal disconnected, reconnecting…',
   ended: 'Session ended', back: 'Back to terminals', readonlyNote: 'This device is read-only',
-  error: 'Error',
+  error: 'Error', manage: 'Manage',
 }
 
 const dict: Record<Key, string> = navigator.language.toLowerCase().startsWith('zh') ? zh : en

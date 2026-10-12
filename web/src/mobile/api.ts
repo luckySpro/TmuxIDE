@@ -40,6 +40,7 @@ export interface Me {
   locked?: boolean
   device?: string
   read_only?: boolean
+  admin?: boolean
 }
 
 export interface TermPane { id: string; index: number; active: boolean; command: string; cwd: string; preview: string }

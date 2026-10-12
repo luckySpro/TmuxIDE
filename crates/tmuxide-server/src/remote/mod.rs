@@ -1,6 +1,7 @@
 //! 远程访问：让已配对的手机/平板经 Cloudflare 隧道或 Tailscale 查看、控制运行中的终端。
 //!
-//! - 远程流量只进入单独的远程端口，那里只有终端相关接口（`remote::api`）；设置、Git、快照等接口不存在。
+//! - 远程流量只进入单独的远程端口，那里默认只有终端相关接口（`remote::api`）。
+//!   只有在电脑上明确“允许远程管理”的设备，才能在 `/admin` 使用完整管理界面（远程访问本身的设置除外）。
 //! - 认证：一次性配对码 → 设备凭证（Cookie，服务端只存 SHA-256）→ 可选 PIN 解锁（空闲超时）。
 //! - 电脑端可看到在线设备与正在打开的终端，随时断开、设为只读或移除。
 
@@ -114,6 +115,13 @@ pub struct RemoteView {
     pub tailscale: ToolInfo,
 }
 
+/// 远程管理请求的发起者，由远程端口在认证后放进请求扩展
+#[derive(Clone)]
+pub(crate) struct AdminCaller {
+    pub device: Device,
+    pub ip: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct DeviceView {
     pub id: String,
@@ -122,6 +130,7 @@ pub struct DeviceView {
     pub last_seen: DateTime<Utc>,
     pub last_ip: String,
     pub read_only: bool,
+    pub admin: bool,
     pub locked: bool,
     pub online: bool,
 }
@@ -429,15 +438,38 @@ impl Remote {
 
     // ---------- 设备与连接 ----------
 
-    pub fn update_device(&self, id: &str, name: Option<&str>, read_only: Option<bool>, unlock: bool) -> AppResult<()> {
+    pub fn update_device(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        read_only: Option<bool>,
+        admin: Option<bool>,
+        unlock: bool,
+    ) -> AppResult<()> {
         let before = self
             .store
             .device(id)
             .ok_or_else(|| AppError::NotFound("设备不存在".into()))?;
+        if admin == Some(true) && !(self.config().require_pin && self.store.has_pin()) {
+            return Err(AppError::BadRequest("允许远程管理前，请先设置并开启解锁 PIN".into()));
+        }
         let dev = self
             .store
-            .update_device(id, name, read_only, unlock)
+            .update_device(id, name, read_only, admin, unlock)
             .map_err(|e| AppError::Other(e.to_string()))?;
+        if before.admin != dev.admin {
+            self.kill_conns(|c| c.device_id == id);
+            self.store.log(
+                "update",
+                Some(&dev.name),
+                "",
+                if dev.admin {
+                    "允许远程管理"
+                } else {
+                    "取消远程管理"
+                },
+            );
+        }
         if before.read_only != dev.read_only {
             // 权限变化后断开，让手机按新权限重新连接
             self.kill_conns(|c| c.device_id == id);
@@ -521,6 +553,48 @@ impl Remote {
         }
     }
 
+    /// 远程管理界面里的内嵌终端：登记连接，电脑上可看到并断开，移除设备时立即断开
+    pub(crate) async fn admin_terminal(
+        self: Arc<Self>,
+        socket: axum::extract::ws::WebSocket,
+        caller: AdminCaller,
+        session: String,
+        size: (u16, u16),
+    ) {
+        let target = format!("{}（管理界面）", self.window_label(&session, None));
+        let (conn, kill, enters) = self.register_conn(&caller.device, &caller.ip, "terminal", target);
+        self.store.log(
+            "attach",
+            Some(&caller.device.name),
+            &caller.ip,
+            format!("管理界面打开终端 {session}"),
+        );
+        let tmux = self.svc.tmux();
+        let (bin, args) = tmux.attach_argv(&session);
+        crate::pty::bridge_with(
+            socket,
+            crate::pty::BridgeSpec {
+                bin,
+                args,
+                env: tmux.extra_env(),
+                size,
+                read_only: false,
+                on_select: None,
+                kill: Some(kill),
+                enters: Some(enters.clone()),
+            },
+        )
+        .await;
+        self.unregister_conn(conn);
+        let n = enters.load(Ordering::Relaxed);
+        self.store.log(
+            "detach",
+            Some(&caller.device.name),
+            &caller.ip,
+            format!("管理界面关闭终端 {session}，发送 {n} 次回车"),
+        );
+    }
+
     pub fn disconnect(&self, id: u64) -> AppResult<()> {
         let conns = self.conns.lock().unwrap();
         let c = conns.get(&id).ok_or_else(|| AppError::NotFound("连接已断开".into()))?;
@@ -569,6 +643,7 @@ impl Remote {
                 last_seen: d.last_seen,
                 last_ip: d.last_ip,
                 read_only: d.read_only,
+                admin: d.admin,
                 locked: d.locked,
             })
             .collect();

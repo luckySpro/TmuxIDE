@@ -36,6 +36,9 @@ pub struct Device {
     pub last_ip: String,
     #[serde(default)]
     pub read_only: bool,
+    /// 允许在这台设备的浏览器里使用完整管理界面（会话、快照、Git、设置）
+    #[serde(default)]
+    pub admin: bool,
     /// PIN 输错次数过多被锁定，需要在电脑上解除
     #[serde(default)]
     pub locked: bool,
@@ -193,6 +196,7 @@ impl Store {
             last_seen: now,
             last_ip: ip.to_string(),
             read_only: false,
+            admin: false,
             locked: false,
             pin_failures: 0,
         };
@@ -241,6 +245,7 @@ impl Store {
         id: &str,
         name: Option<&str>,
         read_only: Option<bool>,
+        admin: Option<bool>,
         unlock: bool,
     ) -> anyhow::Result<Device> {
         let mut st = self.state.lock().unwrap();
@@ -254,6 +259,15 @@ impl Store {
         }
         if let Some(r) = read_only {
             dev.read_only = r;
+            if r {
+                dev.admin = false;
+            }
+        }
+        if let Some(a) = admin {
+            dev.admin = a;
+            if a {
+                dev.read_only = false;
+            }
         }
         if unlock {
             dev.locked = false;
@@ -417,7 +431,7 @@ mod tests {
         assert!(matches!(s.check_pin(&dev.id, "000000"), Err(PinError::Locked)));
         // 锁定后正确 PIN 也不行，直到电脑上解除
         assert!(matches!(s.check_pin(&dev.id, "246810"), Err(PinError::Locked)));
-        s.update_device(&dev.id, None, Some(true), true).unwrap();
+        s.update_device(&dev.id, None, Some(true), None, true).unwrap();
         assert!(s.check_pin(&dev.id, "246810").is_ok());
         assert!(s.device(&dev.id).unwrap().read_only);
 

@@ -247,4 +247,5 @@ TmuxIDE/
 - 已实现上述全部模式与认证流程；cloudflared 固定为 2026.10.0，由 `vendor/cloudflared/fetch.sh` 下载并按 `versions.env` 中的 SHA-256 校验后嵌入。
 - 本地验证：Playwright 端到端（电脑开启 → 设 PIN → 配对 → 手机输错/输对 PIN → 列表 → 打开终端发命令 → 切换窗口与适配尺寸 → 设为只读 → 移除），以及 `scripts/remote-smoke.sh` 的本机端口模式。
 - CI：Linux x86_64 与 macOS arm64 用 `scripts/remote-smoke.sh` 经真实 Cloudflare 快速隧道跑通配对、认证与终端连接；Linux arm64 跑本机端口模式。
+- 远程管理（设备级选项，默认关闭）：授权设备在远程地址 `/admin` 使用完整界面，接口经 `/api/admin` 转发到本机接口的子集（不含远程访问的写接口）；需要 PIN；每个写操作记入访问记录。已用 Playwright 验证。
 - 未验证：Tailscale 两种模式（需要已登录 tailnet 的机器）、Cloudflare 自有域名模式（需要 Tunnel Token）、真机 iOS/Android 浏览器。

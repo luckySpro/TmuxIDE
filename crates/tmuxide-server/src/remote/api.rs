@@ -1,4 +1,4 @@
-//! 远程端口上的接口（手机页面使用）。这里只有配对、解锁和终端相关的接口。
+//! 远程端口上的接口：配对、解锁、终端，以及授权设备的远程管理（`/api/admin`，转发到本机管理接口的子集）。
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -38,6 +38,11 @@ pub fn router(remote: R) -> Router {
         .route("/api/forget", post(forget))
         .route("/api/events", get(events))
         .route("/api/attach", get(attach))
+        .nest_service(
+            "/api/admin",
+            crate::api::admin_router(remote.svc.clone(), remote.clone())
+                .layer(middleware::from_fn_with_state(remote.clone(), admin_guard)),
+        )
         .fallback(static_files)
         .layer(middleware::from_fn_with_state(remote.clone(), guard))
         .with_state(remote)
@@ -200,7 +205,10 @@ async fn me(State(remote): State<R>, ConnectInfo(peer): ConnectInfo<SocketAddr>,
     let host = remote.svc.host().to_string();
     let base = json!({ "host": host, "version": env!("CARGO_PKG_VERSION") });
     let state = match authenticate(&remote, &c, &headers, true) {
-        Ok(dev) => json!({ "paired": true, "unlocked": true, "device": dev.name, "read_only": dev.read_only }),
+        Ok(dev) => json!({
+            "paired": true, "unlocked": true, "device": dev.name, "read_only": dev.read_only,
+            "admin": dev.admin && remote.config().require_pin,
+        }),
         Err(AuthFail::NeedPin) => json!({ "paired": true, "unlocked": false, "need_pin": true }),
         Err(AuthFail::Locked) => json!({ "paired": true, "unlocked": false, "locked": true }),
         Err(AuthFail::NotPaired) => json!({ "paired": false, "unlocked": false }),
@@ -356,6 +364,56 @@ async fn forget(State(remote): State<R>, ConnectInfo(peer): ConnectInfo<SocketAd
     resp
 }
 
+/// 远程管理：只允许电脑上明确授权、且已用 PIN 解锁的设备；写操作和 WebSocket 校验来源并记录
+async fn admin_guard(
+    State(remote): State<R>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    mut req: Request,
+    next: Next,
+) -> Response {
+    let headers = req.headers().clone();
+    let c = client(&remote, &headers, peer);
+    let dev = match authenticate(&remote, &c, &headers, true) {
+        Ok(d) => d,
+        Err(f) => return f.response(),
+    };
+    if !dev.admin || dev.read_only {
+        return err(
+            StatusCode::FORBIDDEN,
+            "这台设备没有远程管理权限，请在电脑上“已配对设备”中开启",
+        );
+    }
+    if !remote.config().require_pin {
+        return err(StatusCode::FORBIDDEN, "远程管理需要在电脑上开启解锁 PIN");
+    }
+    let method = req.method().clone();
+    let is_ws = headers.contains_key(header::UPGRADE);
+    if method != axum::http::Method::GET || is_ws {
+        if let Err(r) = check_origin(&c, &headers) {
+            return r;
+        }
+    }
+    let path = req.uri().path().to_string();
+    let name = dev.name.clone();
+    req.extensions_mut().insert(super::AdminCaller {
+        device: dev,
+        ip: c.ip.clone(),
+    });
+    let resp = next.run(req).await;
+    if method != axum::http::Method::GET {
+        let st = resp.status();
+        let result = if st.is_success() {
+            String::new()
+        } else {
+            format!("（被拒绝 {}）", st.as_u16())
+        };
+        remote
+            .store
+            .log("admin", Some(&name), &c.ip, format!("管理操作 {method} {path}{result}"));
+    }
+    resp
+}
+
 /// WebSocket 前的统一检查
 #[allow(clippy::result_large_err)]
 fn ws_auth(remote: &Remote, c: &Client, headers: &HeaderMap) -> Result<Device, Response> {
@@ -446,29 +504,39 @@ async fn attach(
     let tmux = remote.svc.tmux();
     let id = remote.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let grouped = format!("{}m{id}{}", tmuxide_tmux::HIDDEN_PREFIX, super::store::random_hex(3));
-    let setup = {
+    let exists = {
         let tmux = tmux.clone();
         let session = q.session.clone();
-        let grouped = grouped.clone();
-        let window = q.window.clone();
-        tokio::task::spawn_blocking(move || -> Result<(), String> {
-            if !tmux.has_session(&session) {
-                return Err(format!("会话 {session} 不存在"));
-            }
-            tmux.new_grouped(&session, &grouped).map_err(|e| e.to_string())?;
-            if let Some(w) = window {
-                let _ = tmux.select_window(&format!("={grouped}:{w}"));
-            }
-            Ok(())
-        })
-        .await
-        .unwrap_or_else(|e| Err(e.to_string()))
+        tokio::task::spawn_blocking(move || tmux.has_session(&session))
+            .await
+            .unwrap_or(false)
     };
-    if let Err(e) = setup {
-        return err(StatusCode::NOT_FOUND, &e);
+    if !exists {
+        return err(StatusCode::NOT_FOUND, &format!("会话 {} 不存在", q.session));
     }
     let size = (q.cols.unwrap_or(80).clamp(10, 1000), q.rows.unwrap_or(24).clamp(5, 500));
+    // 分组会话在升级成功后才创建：客户端在握手中途离开时不会留下内部会话
     ws.on_upgrade(move |socket| async move {
+        let setup = {
+            let tmux = tmux.clone();
+            let session = q.session.clone();
+            let grouped = grouped.clone();
+            let window = q.window.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), String> {
+                tmux.new_grouped(&session, &grouped).map_err(|e| e.to_string())?;
+                if let Some(w) = window {
+                    let _ = tmux.select_window(&format!("={grouped}:{w}"));
+                }
+                Ok(())
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()))
+        };
+        if let Err(e) = setup {
+            let mut socket = socket;
+            let _ = socket.send(Message::Text(format!("\r\n{e}\r\n").into())).await;
+            return;
+        }
         let target = remote.window_label(&q.session, q.window.as_deref());
         let (conn, kill, enters) = remote.register_conn(&dev, &c.ip, "terminal", target.clone());
         remote.store.log(

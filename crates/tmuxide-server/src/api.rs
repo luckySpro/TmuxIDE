@@ -6,7 +6,7 @@ use axum::{
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, patch, post, put},
-    Json, Router,
+    Extension, Json, Router,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use crate::{
     config::RemoteConfig,
     error::{AppError, AppResult},
-    remote::Remote,
+    remote::{AdminCaller, Remote},
     service::{RestoreRequest, Service, SettingsView},
 };
 
@@ -24,6 +24,8 @@ struct Ctx {
     remote: Arc<Remote>,
     token: Arc<String>,
     port: u16,
+    /// 经远程端口转发的管理请求（已在远程端口完成设备认证与来源校验）
+    remote_admin: bool,
 }
 
 pub fn router(svc: Arc<Service>, remote: Arc<Remote>, token: String, port: u16) -> Router {
@@ -32,8 +34,31 @@ pub fn router(svc: Arc<Service>, remote: Arc<Remote>, token: String, port: u16) 
         remote,
         token: Arc::new(token),
         port,
+        remote_admin: false,
     };
-    let api = Router::new()
+    let api = routes(false).layer(middleware::from_fn_with_state(ctx.clone(), require_token));
+    Router::new()
+        .nest("/api", api)
+        .fallback(crate::assets::static_handler)
+        .layer(middleware::from_fn_with_state(ctx.clone(), check_host))
+        .with_state(ctx)
+}
+
+/// 远程管理使用的接口：由远程端口在设备认证之后转发进来。
+/// 不包含远程访问自身的写接口，远程设备不能给自己或别的设备提权、改 PIN 或配对新设备。
+pub(crate) fn admin_router(svc: Arc<Service>, remote: Arc<Remote>) -> Router {
+    let ctx = Ctx {
+        svc,
+        remote,
+        token: Arc::new(String::new()),
+        port: 0,
+        remote_admin: true,
+    };
+    routes(true).with_state(ctx)
+}
+
+fn routes(remote_admin: bool) -> Router<Ctx> {
+    let r = Router::new()
         .route("/info", get(info))
         .route("/sessions", get(sessions).post(new_session))
         .route("/sessions/{name}", delete(kill_session))
@@ -59,7 +84,11 @@ pub fn router(svc: Arc<Service>, remote: Arc<Remote>, token: String, port: u16) 
         .route("/settings", get(settings).put(update_settings))
         .route("/attach", get(attach))
         .route("/remote", get(remote_view))
-        .route("/remote/config", put(remote_config))
+        .route("/remote/events", get(remote_events));
+    if remote_admin {
+        return r;
+    }
+    r.route("/remote/config", put(remote_config))
         .route("/remote/pin", post(remote_pin))
         .route("/remote/pair", post(remote_pair).delete(remote_pair_cancel))
         .route(
@@ -68,13 +97,6 @@ pub fn router(svc: Arc<Service>, remote: Arc<Remote>, token: String, port: u16) 
         )
         .route("/remote/connections/{id}", delete(remote_disconnect))
         .route("/remote/restart", post(remote_restart))
-        .route("/remote/events", get(remote_events))
-        .layer(middleware::from_fn_with_state(ctx.clone(), require_token));
-    Router::new()
-        .nest("/api", api)
-        .fallback(crate::assets::static_handler)
-        .layer(middleware::from_fn_with_state(ctx.clone(), check_host))
-        .with_state(ctx)
 }
 
 /// 防止 DNS rebinding：只接受发往本机地址的请求
@@ -313,9 +335,24 @@ struct AttachQuery {
 async fn attach(
     State(ctx): State<Ctx>,
     headers: HeaderMap,
+    caller: Option<Extension<AdminCaller>>,
     Query(q): Query<AttachQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    if ctx.remote_admin {
+        let Some(Extension(caller)) = caller else {
+            return (StatusCode::FORBIDDEN, "forbidden").into_response();
+        };
+        if !tmuxide_core::valid_session_name(&q.session) {
+            return AppError::BadRequest("会话名不合法".into()).into_response();
+        }
+        let size = (
+            q.cols.unwrap_or(120).clamp(10, 1000),
+            q.rows.unwrap_or(40).clamp(5, 500),
+        );
+        let remote = ctx.remote.clone();
+        return ws.on_upgrade(move |socket| remote.admin_terminal(socket, caller, q.session, size));
+    }
     // 浏览器会带 Origin：只允许本服务自己的页面连接
     if let Some(origin) = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()) {
         let allowed = [
@@ -402,13 +439,14 @@ async fn remote_pair_cancel(State(ctx): State<Ctx>) -> J {
 struct DeviceBody {
     name: Option<String>,
     read_only: Option<bool>,
+    admin: Option<bool>,
     #[serde(default)]
     unlock: bool,
 }
 
 async fn remote_device(State(ctx): State<Ctx>, Path(id): Path<String>, Json(b): Json<DeviceBody>) -> J {
     ctx.remote
-        .update_device(&id, b.name.as_deref(), b.read_only, b.unlock)?;
+        .update_device(&id, b.name.as_deref(), b.read_only, b.admin, b.unlock)?;
     ok(json!({ "ok": true }))
 }
 

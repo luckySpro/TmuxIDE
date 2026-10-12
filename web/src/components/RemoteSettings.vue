@@ -114,6 +114,10 @@ async function call(fn: () => Promise<unknown>) {
 const pair = () => call(() => api.post('/remote/pair'))
 const cancelPair = () => call(() => api.del('/remote/pair'))
 const setReadOnly = (id: string, ro: boolean) => call(() => api.patch(`/remote/devices/${id}`, { read_only: ro }))
+function setAdmin(id: string, name: string, admin: boolean) {
+  if (admin && !confirm(t('adminConfirm', { name }))) return
+  call(() => api.patch(`/remote/devices/${id}`, { admin }))
+}
 const unlockDevice = (id: string) => call(() => api.patch(`/remote/devices/${id}`, { unlock: true }))
 const disconnect = (id: number) => call(() => api.del(`/remote/connections/${id}`))
 function removeDevice(id: string, name: string) {
@@ -256,12 +260,13 @@ onBeforeUnmount(() => window.clearInterval(timer))
                 <span v-if="d.online" class="badge">{{ t('online') }}</span>
                 <span v-if="d.locked" class="badge bad">{{ t('lockedDev') }}</span>
               </div>
-              <div class="hint">{{ d.read_only ? t('readOnlyDev') : t('controlDev') }} · {{ viewing(d.id)?.text ?? t('lastUsed', { t: formatTime(d.last_seen) }) }}<template v-if="d.last_ip"> · {{ d.last_ip }}</template></div>
+              <div class="hint">{{ d.read_only ? t('readOnlyDev') : d.admin ? t('adminDev') : t('controlDev') }} · {{ viewing(d.id)?.text ?? t('lastUsed', { t: formatTime(d.last_seen) }) }}<template v-if="d.last_ip"> · {{ d.last_ip }}</template></div>
             </div>
             <div class="dev-actions">
               <button v-if="d.locked" class="btn small" @click="unlockDevice(d.id)">{{ t('unlockDevice') }}</button>
               <button v-if="viewing(d.id)" class="btn small" @click="disconnect(viewing(d.id)!.id)">{{ t('disconnect') }}</button>
               <button class="btn small" @click="setReadOnly(d.id, !d.read_only)">{{ d.read_only ? t('setControl') : t('setReadOnly') }}</button>
+              <button class="btn small" @click="setAdmin(d.id, d.name, !d.admin)">{{ d.admin ? t('unsetAdmin') : t('setAdmin') }}</button>
               <button class="btn small danger" @click="removeDevice(d.id, d.name)">{{ t('removeDevice') }}</button>
             </div>
           </div>

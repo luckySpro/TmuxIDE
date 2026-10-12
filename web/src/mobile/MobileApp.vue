@@ -227,6 +227,7 @@ onBeforeUnmount(() => {
           <div class="host">{{ me?.host }}</div>
           <div class="state" :class="{ off: !live }"><span class="dot" />{{ live ? t('live') : t('offline') }}</div>
         </div>
+        <a v-if="me?.admin" class="manage" href="/admin">{{ t('manage') }}</a>
         <button class="icon" :aria-label="t('lock')" @click="lockNow"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg></button>
       </header>
       <main class="sessions">

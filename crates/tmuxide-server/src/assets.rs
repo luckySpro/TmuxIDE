@@ -46,11 +46,13 @@ fn respond(name: &str, data: Vec<u8>, csp: &str) -> Response {
         .into_response()
 }
 
-/// 远程端口上的静态资源：只提供手机页面（m.html）及其脚本样式，不提供电脑界面
+/// 远程端口上的静态资源：手机页面（m.html），以及远程管理用的电脑界面（/admin）
 pub fn mobile_asset(path: &str, csp: &str) -> Response {
     let path = path.trim_start_matches('/');
     let name = match path {
         "" | "index.html" | "m.html" => "m.html",
+        // 远程管理界面（接口另行校验设备权限）
+        "admin" | "admin/" => "index.html",
         p if p.starts_with("assets/") || p == "manifest.webmanifest" || p.starts_with("icon-") => p,
         _ => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };
