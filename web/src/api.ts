@@ -70,7 +70,7 @@ export const enc = encodeURIComponent
 
 export interface PaneInfo { index: number; id: string; active: boolean; pid: number; width: number; height: number; command: string; cwd: string }
 export interface WindowInfo { index: number; id: string; name: string; active: boolean; layout: string; panes: PaneInfo[] }
-export interface SessionInfo { name: string; id: string; attached: number; created: number; windows: WindowInfo[] }
+export interface SessionInfo { name: string; id: string; attached: number; created: number; group: string; windows: WindowInfo[] }
 export interface SavedEntry { host: string; name: string; saved_at: string; windows: number; panes: number; local: boolean; running: boolean }
 export interface TemplateEntry { name: string; windows: string[]; panes: number }
 export interface CommitInfo { id: string; short: string; summary: string; time: number; author: string }
@@ -90,7 +90,7 @@ export interface Config {
   }
   save: { autosave_minutes: number; scrollback: boolean; scrollback_lines: number; exclude: string[] }
   tmux: { use_system: boolean; socket: string }
-  ui: { language: string }
+  ui: { language: string; check_updates: boolean }
   remote: RemoteConfig
 }
 export interface RemoteConfig {
@@ -101,6 +101,12 @@ export interface ToolInfo { found: boolean; bundled: boolean; path: string; vers
 export interface RemoteDevice { id: string; name: string; created_at: string; last_seen: string; last_ip: string; read_only: boolean; admin: boolean; locked: boolean; online: boolean }
 export interface RemoteConn { id: number; device_id: string; device_name: string; ip: string; kind: 'list' | 'terminal'; target: string; started: string; enters: number }
 export interface AuditEvent { seq: number; ts: string; kind: string; device: string | null; ip: string; detail: string }
+export interface UpdateView {
+  enabled: boolean; kind: 'desktop' | 'cli'; current: string
+  state: 'idle' | 'checking' | 'uptodate' | 'available' | 'downloading' | 'ready' | 'error'
+  latest: string | null; notes: string; required: boolean; downloaded: number; total: number
+  error: string | null; checked_at: string | null; release_url: string | null; manual_reason: string | null; can_restart: boolean
+}
 export interface PairingView { code: string; expires_in: number; url: string | null; qr_svg: string | null }
 export interface RemoteView {
   config: RemoteConfig; has_token: boolean; has_pin: boolean

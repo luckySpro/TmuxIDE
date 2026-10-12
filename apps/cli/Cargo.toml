@@ -14,6 +14,7 @@ path = "src/main.rs"
 tmuxide-server.workspace = true
 tmuxide-tmux.workspace = true
 tmuxide-git.workspace = true
+tmuxide-update.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

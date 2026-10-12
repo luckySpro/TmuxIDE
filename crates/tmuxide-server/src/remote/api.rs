@@ -40,7 +40,7 @@ pub fn router(remote: R) -> Router {
         .route("/api/attach", get(attach))
         .nest_service(
             "/api/admin",
-            crate::api::admin_router(remote.svc.clone(), remote.clone())
+            crate::api::admin_router(remote.svc.clone(), remote.clone(), remote.updater())
                 .layer(middleware::from_fn_with_state(remote.clone(), admin_guard)),
         )
         .fallback(static_files)

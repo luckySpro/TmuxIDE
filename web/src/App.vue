@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import TopBar from './components/TopBar.vue'
 import StatusBar from './components/StatusBar.vue'
 import Toasts from './components/Toasts.vue'
+import UpdateGate from './components/UpdateGate.vue'
 import Workspace from './views/Workspace.vue'
 import Settings from './views/Settings.vue'
 import History from './views/History.vue'
@@ -24,6 +25,7 @@ onMounted(init)
     <History v-else-if="state.view === 'history'" />
     <StatusBar />
     <Toasts />
+    <UpdateGate v-if="state.update?.required && state.update.enabled" />
     <span class="sr-only" aria-live="polite">{{ state.busy ? t('loading') : '' }}</span>
   </div>
 </template>

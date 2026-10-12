@@ -11,16 +11,20 @@ mod pty;
 pub mod remote;
 mod secrets;
 pub mod service;
+pub mod update;
 
 use std::{net::SocketAddr, sync::Arc};
 
 pub use config::{AppPaths, Config};
 pub use remote::Remote;
 pub use service::Service;
+pub use update::{CliInstaller, Installer, Updater};
 
 pub struct ServeOptions {
     pub port: u16,
     pub paths: AppPaths,
+    /// 安装新版本的方式（桌面版 / 命令行版）
+    pub installer: Arc<dyn Installer>,
 }
 
 pub struct ServerHandle {
@@ -28,6 +32,7 @@ pub struct ServerHandle {
     pub token: String,
     pub service: Arc<Service>,
     pub remote: Arc<Remote>,
+    pub updater: Arc<Updater>,
 }
 
 impl ServerHandle {
@@ -41,11 +46,18 @@ impl ServerHandle {
 pub async fn start(opts: ServeOptions) -> anyhow::Result<ServerHandle> {
     let service = Arc::new(Service::new(opts.paths)?);
     service.clone().spawn_autosave();
-    let remote = Remote::new(service.clone())?;
+    let updater = Updater::new(service.clone(), opts.installer);
+    let remote = Remote::new(service.clone(), updater.clone())?;
     let token = random_token();
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", opts.port)).await?;
     let addr = listener.local_addr()?;
-    let app = api::router(service.clone(), remote.clone(), token.clone(), addr.port());
+    let app = api::router(
+        service.clone(),
+        remote.clone(),
+        updater.clone(),
+        token.clone(),
+        addr.port(),
+    );
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!("HTTP 服务退出：{e}");
@@ -53,11 +65,13 @@ pub async fn start(opts: ServeOptions) -> anyhow::Result<ServerHandle> {
     });
     tracing::info!("TmuxIDE 服务已启动：http://{addr}");
     remote.autostart();
+    updater.spawn_periodic();
     Ok(ServerHandle {
         addr,
         token,
         service,
         remote,
+        updater,
     })
 }
 

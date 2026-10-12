@@ -3,6 +3,11 @@ import { api, remoteAdmin } from '../api'
 import { lang, languages, t } from '../i18n'
 import { state } from '../store'
 
+function openAbout() {
+  state.settingsSection = 'about'
+  state.view = 'settings'
+}
+
 function openRemote() {
   state.settingsSection = 'remote'
   state.view = 'settings'
@@ -30,6 +35,9 @@ async function switchLang() {
     <button v-else-if="state.remote && state.remote.state !== 'off'" class="lang remote" :class="state.remote.state" @click="openRemote">
       <span class="dot" />{{ t('remoteBar') }}<template v-if="state.remote.terminals"> · {{ t('remoteBarTerminals', { n: state.remote.terminals }) }}</template>
     </button>
+    <button v-if="state.update && ['available', 'downloading', 'ready'].includes(state.update.state)" class="lang upd" @click="openAbout">
+      <span class="dot" />{{ state.update.state === 'ready' ? t('updBarReady') : t('updBar', { v: state.update.latest ?? '' }) }}
+    </button>
     <span>{{ state.autosaveMinutes ? t('autosaveEvery', { n: state.autosaveMinutes }) : t('autosaveOff') }}</span>
     <span>{{ state.info?.host }}</span>
     <button class="lang" @click="switchLang">{{ languages.find((l) => l.id === lang)?.label }}</button>
@@ -44,6 +52,8 @@ async function switchLang() {
 .lang { background: none; border: 0; color: var(--text-2); cursor: pointer; font-size: 12px; padding: 0; }
 .lang:hover { color: var(--text); }
 .remote { text-decoration: none; display: flex; align-items: center; gap: 6px; }
+.upd { display: flex; align-items: center; gap: 6px; color: var(--amber); }
+.upd .dot { width: 6px; height: 6px; background: var(--amber); }
 .remote .dot { width: 6px; height: 6px; background: var(--amber); }
 .remote.online .dot { background: var(--accent); }
 .remote.error .dot { background: var(--red); }

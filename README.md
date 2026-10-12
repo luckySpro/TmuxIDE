@@ -11,6 +11,8 @@
 - **Git 同步**：快照是人类可读的 TOML，每次保存一个提交；支持 SSH 密钥、ssh-agent、HTTPS Token；每台电脑写自己的目录，多机同步不冲突。
 - **一次安装，没有其他依赖**：tmux 静态编译后嵌入程序；Git 使用静态链接的 libgit2（含 libssh2、OpenSSL），不需要系统 git；前端资源和字体都在二进制里，运行时不联网。
 - **手机远程访问**（0.2 起）：用手机或平板查看、控制电脑上正在运行的终端。网络可选 Cloudflare 快速隧道（内置 cloudflared，不需要账号）、Cloudflare 自有域名、Tailscale，或自己的反向代理；必须先在电脑上扫码配对，每台设备有独立凭证，可加 PIN、设为只读、随时移除，所有访问都有记录。可对单台设备“允许远程管理”，在另一台电脑的浏览器里使用完整管理界面。
+- **会话选项卡与分组**（0.3 起）：工作区顶部用选项卡切换会话，会话可以分组并按分组筛选。
+- **自动升级**（0.3 起）：桌面版和命令行版定期检查签名的升级目录，下载时先走 GH-Proxy 加速再回到 GitHub 官方地址，安装前校验发布签名。
 - **隔离**：TmuxIDE 使用专用 tmux socket（默认 `tmuxide`），不影响你自己的 tmux；仍会加载 `~/.tmux.conf`。
 
 ## 下载
@@ -42,7 +44,17 @@ tmuxide sync                  # 先拉取再推送
 tmuxide history dev
 tmuxide tmux attach -t dev    # 直接使用内置 tmux
 tmuxide init-remote /Volumes/NAS/tmux-sessions.git   # 在 NAS / 同步盘上建一个远程仓库
+tmuxide update [--check]      # 检查并安装新版本（校验发布签名）
 ```
+
+## 升级
+
+桌面版和 `tmuxide serve` 启动后会检查新版本，之后每 6 小时一次（“设置 → 通用”可关闭），“设置 → 关于”可手动检查、下载、安装。桌面版安装后点“立即重启”；命令行版替换当前程序，下次启动生效。tmux 会话不受升级影响。
+
+- 升级目录 `update.json` 与桌面版安装包都用发布私钥签名，程序只包含公钥（`crates/tmuxide-update/updater.pub`）。签名无效、目录比已知的旧、安装包与目录不一致时一律拒绝。
+- 下载先走 [GH-Proxy](https://gh-proxy.com/) 加速，失败再用 github.com 官方地址。
+- 发布时可以指定最低支持版本，低于它的客户端会弹出无法关闭的升级提示。
+- 0.2.0 及更早版本没有升级功能，需要手动安装一次 0.3.0。
 
 远程访问在“设置 → 远程访问”中开启（桌面版和 `tmuxide serve` 打开的网页相同）；开启后也可以用 `tmuxide serve --pair` 在终端里显示配对二维码。
 

@@ -10,6 +10,7 @@ license.workspace = true
 tmuxide-core.workspace = true
 tmuxide-tmux.workspace = true
 tmuxide-git.workspace = true
+tmuxide-update.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

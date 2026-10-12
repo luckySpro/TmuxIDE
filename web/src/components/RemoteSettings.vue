@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from './Icon.vue'
 import { api, type RemoteConfig, type RemoteView } from '../api'
 import { formatTime, t } from '../i18n'
-import { toast } from '../store'
+import { copyText, toast } from '../store'
 
 const view = ref<RemoteView | null>(null)
 const draft = ref<RemoteConfig | null>(null)
@@ -194,6 +194,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <span class="dot" />
             <span>{{ stateLabel }}</span>
             <a v-if="view.status.url" class="mono url" :href="view.status.url" target="_blank" rel="noreferrer">{{ view.status.url }}</a>
+            <button v-if="view.status.url" class="btn small copy" :title="t('copy')" @click="copyText(view.status.url)"><Icon name="copy" :size="13" />{{ t('copy') }}</button>
             <span v-if="view.status.message && view.status.state !== 'online'" class="msg">{{ view.status.message }}</span>
             <span class="grow" />
             <span v-if="draft.mode.startsWith('cloudflare')" class="hint">{{ view.cloudflared.bundled ? t('cfBuiltin') : view.cloudflared.found ? t('cfSystem') : t('cfMissing') }}</span>
@@ -242,7 +243,11 @@ onBeforeUnmount(() => window.clearInterval(timer))
             <div v-if="view.pairing.qr_svg" class="qr" v-html="view.pairing.qr_svg" />
             <div>
               <p class="hint">{{ view.pairing.qr_svg ? t('pairScan') : t('pairNoUrl') }}</p>
-              <div class="code mono">{{ view.pairing.code }}</div>
+              <div class="code-row">
+                <div class="code mono">{{ view.pairing.code }}</div>
+                <button class="btn small copy" :title="t('copy')" @click="copyText(view.pairing.code)"><Icon name="copy" :size="13" />{{ t('copy') }}</button>
+              </div>
+              <button v-if="view.pairing.url" class="btn small copy link-copy" @click="copyText(view.pairing.url)"><Icon name="link" :size="13" />{{ t('copyPairLink') }}</button>
               <div class="hint">{{ t('pairExpires', { s: view.pairing.expires_in }) }}</div>
               <ul><li>{{ t('pairBullet1') }}</li><li>{{ t('pairBullet2') }}</li></ul>
             </div>
@@ -330,7 +335,10 @@ h2 { display: flex; align-items: center; justify-content: space-between; gap: 8p
 .pairing { display: flex; gap: 18px; align-items: center; }
 .qr { flex-shrink: 0; width: 170px; height: 170px; padding: 8px; background: #fff; border-radius: 8px; line-height: 0; }
 .qr :deep(svg) { width: 100%; height: 100%; }
-.code { font-size: 26px; font-weight: 600; letter-spacing: .08em; color: var(--accent); margin: 8px 0 6px; }
+.code-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.copy { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.link-copy { margin-bottom: 8px; }
+.code { white-space: nowrap; font-size: 26px; font-weight: 600; letter-spacing: .08em; color: var(--accent); margin: 8px 0 6px; }
 .pairing ul { margin: 12px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--text-2); line-height: 1.7; }
 .dev { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px 12px; align-items: center; padding: 11px 0; border-top: 1px solid #222831; }
 .dev:first-of-type { border-top: 0; }

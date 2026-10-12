@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { api, ApiError, type AppInfo, type RemoteSummary, type SavedEntry, type SessionInfo, type SyncStatus, type TemplateEntry } from './api'
+import { api, ApiError, type AppInfo, type RemoteSummary, type SavedEntry, type SessionInfo, type SyncStatus, type TemplateEntry, type UpdateView } from './api'
 import { lang, t } from './i18n'
 
 export type View = 'workspace' | 'settings' | 'history'
@@ -22,7 +22,41 @@ export const state = reactive({
   remote: null as RemoteSummary | null,
   /** 从状态栏点进设置时直接打开某个分区 */
   settingsSection: '' as string,
+  /** 会话选项卡只显示这个分组（空为全部） */
+  groupFilter: loadGroup(),
+  update: null as UpdateView | null,
 })
+
+function loadGroup(): string {
+  try { return localStorage.getItem('tmx-group') ?? '' } catch { return '' }
+}
+
+export function setGroupFilter(g: string) {
+  state.groupFilter = g
+  try { localStorage.setItem('tmx-group', g) } catch { /* 忽略 */ }
+}
+
+/** 已有的分组名称（来自正在运行的会话） */
+export function groupNames(): string[] {
+  return [...new Set(state.sessions.map((s) => s.group).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+}
+
+export async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // 非安全上下文（例如通过 http 访问）时退回旧方法
+    const el = document.createElement('textarea')
+    el.value = text
+    el.style.position = 'fixed'
+    el.style.opacity = '0'
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand('copy')
+    el.remove()
+  }
+  toast(t('copied'))
+}
 
 let toastId = 0
 export function toast(text: string, kind: 'ok' | 'error' = 'ok') {
@@ -96,6 +130,28 @@ export async function init() {
   setInterval(refreshAll, 15000)
   pollRemote()
   setInterval(pollRemote, 4000)
+  pollUpdate()
+}
+
+/** 升级状态：下载中每秒刷新，平时每分钟刷新（检查本身由服务定时执行） */
+let updateTimer: number | undefined
+export async function pollUpdate() {
+  window.clearTimeout(updateTimer)
+  try {
+    state.update = await api.get<UpdateView>('/update')
+  } catch { /* 旧版服务 */ }
+  const busy = state.update && ['checking', 'downloading'].includes(state.update.state)
+  updateTimer = window.setTimeout(pollUpdate, busy ? 1000 : 60000)
+}
+
+export async function updateAction(path: 'check' | 'install' | 'restart') {
+  try {
+    const r = await api.post<UpdateView | null>(`/update/${path}`)
+    if (r) state.update = r
+  } catch (e) {
+    handle(e)
+  }
+  if (path !== 'restart') pollUpdate()
 }
 
 /** 有手机配对、打开终端或认证失败时在电脑上提醒 */

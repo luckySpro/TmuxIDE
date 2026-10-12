@@ -123,12 +123,15 @@ impl Default for TmuxConfig {
 pub struct UiConfig {
     /// zh-CN | en
     pub language: String,
+    /// 启动时和每隔几小时检查一次新版本（只下载签名的升级目录，不上传任何信息）
+    pub check_updates: bool,
 }
 
 impl Default for UiConfig {
     fn default() -> Self {
         UiConfig {
             language: "zh-CN".into(),
+            check_updates: true,
         }
     }
 }

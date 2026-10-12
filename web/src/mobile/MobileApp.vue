@@ -40,7 +40,36 @@ function readPairFromHash() {
     code.value = m[1].toUpperCase()
     fromQr.value = true
     history.replaceState(null, '', location.pathname + location.search)
+  } else {
+    // 隧道验证跳转前暂存的配对码与设备名
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('tmx-pair') ?? 'null')
+      if (saved) {
+        code.value = saved.code
+        deviceName.value = saved.name
+        fromQr.value = true
+      }
+      sessionStorage.removeItem('tmx-pair')
+    } catch { /* 隐私模式 */ }
   }
+}
+
+/** 隧道一层的认证（Cloudflare 邮箱验证）失效：整页重新打开以走一遍验证；短时间内重复失败则提示原因 */
+function handleTunnelAuth(e: unknown) {
+  if (!(e instanceof ApiError && e.tunnelAuth)) return false
+  let last = 0
+  try { last = Number(sessionStorage.getItem('tmx-tunnel-auth')) || 0 } catch { /* 忽略 */ }
+  if (Date.now() - last < 60_000) {
+    error.value = t('tunnelAuthFailed')
+    return true
+  }
+  try {
+    sessionStorage.setItem('tmx-tunnel-auth', String(Date.now()))
+    if (code.value) sessionStorage.setItem('tmx-pair', JSON.stringify({ code: code.value, name: deviceName.value }))
+  } catch { /* 忽略 */ }
+  error.value = t('tunnelAuth')
+  location.reload()
+  return true
 }
 
 async function refreshMe() {
@@ -55,6 +84,7 @@ async function refreshMe() {
       connectEvents()
     }
   } catch (e) {
+    if (handleTunnelAuth(e)) return
     error.value = e instanceof Error ? e.message : String(e)
     screen.value = 'error'
   }
@@ -93,7 +123,7 @@ async function pair() {
     if (r.need_pin) screen.value = 'pin'
     await refreshMe()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    if (!handleTunnelAuth(e)) error.value = e instanceof Error ? e.message : String(e)
   } finally {
     busy.value = false
   }
@@ -107,8 +137,9 @@ async function unlock() {
     pin.value = ''
     await refreshMe()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
     pin.value = ''
+    if (handleTunnelAuth(e)) return
+    error.value = e instanceof Error ? e.message : String(e)
     if (e instanceof ApiError && e.status === 423) screen.value = 'locked'
   } finally {
     busy.value = false
@@ -133,6 +164,17 @@ async function forget() {
 function open(session: string, window: string) {
   target.value = { session, window }
   screen.value = 'term'
+}
+
+/** 会话按分组排列，未分组的在最后 */
+const sortedSessions = computed(() =>
+  (list.value?.sessions ?? []).slice().sort((a, b) => (a.group || '\uffff').localeCompare(b.group || '\uffff') || a.name.localeCompare(b.name)),
+)
+
+function switchSession(name: string) {
+  const s = list.value?.sessions.find((x) => x.name === name)
+  const w = s?.windows.find((x) => x.active) ?? s?.windows[0]
+  if (s && w) target.value = { session: s.name, window: w.id }
 }
 
 function closeTerm() {
@@ -233,7 +275,9 @@ onBeforeUnmount(() => {
       <main class="sessions">
         <p v-if="list?.error" class="error">{{ list.error }}</p>
         <p v-else-if="list && !list.sessions.length" class="empty muted">{{ t('noSessions') }}</p>
-        <section v-for="s in list?.sessions ?? []" :key="s.name">
+        <section v-for="(s, i) in sortedSessions" :key="s.name">
+          <h3 v-if="s.group && s.group !== sortedSessions[i - 1]?.group" class="ghead">{{ s.group }}</h3>
+          <h3 v-else-if="!s.group && i > 0 && sortedSessions[i - 1]?.group" class="ghead">{{ t('ungrouped') }}</h3>
           <h2><span class="mono">{{ s.name }}</span>{{ t('windows', { n: s.windows.length }) }}<em v-if="s.attached">{{ t('usedOnDesktop') }}</em></h2>
           <button v-for="w in s.windows" :key="w.id" class="card" :class="{ active: w.active }" @click="open(s.name, w.id)">
             <div class="card-head">
@@ -253,9 +297,11 @@ onBeforeUnmount(() => {
       :session="target.session"
       :window="target.window"
       :windows="termSession?.windows ?? []"
+      :sessions="sortedSessions"
       :read-only="!!me?.read_only"
       @back="closeTerm"
       @select="(w: string) => target && (target.window = w)"
+      @switch="switchSession"
       @auth-lost="termAuthLost"
     />
   </div>

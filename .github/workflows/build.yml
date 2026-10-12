@@ -11,12 +11,19 @@ on:
         description: 发布版本号（例如 v0.1.0），留空只编译不发布
         required: false
         default: ''
+      min_version:
+        description: 最低支持版本（例如 0.3.0），低于它的客户端必须升级；留空表示不强制
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  # 升级签名私钥只在 GitHub Secrets 中；程序里只有公钥（crates/tmuxide-update/updater.pub）
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
 jobs:
   check:
@@ -144,12 +151,13 @@ jobs:
           export TMUXIDE_CLOUDFLARED_BIN=$GITHUB_WORKSPACE/vendor/cloudflared/out/cloudflared-linux-x86_64
           export TMUXIDE_CLOUDFLARED_VERSION=$(cat ../../vendor/cloudflared/out/VERSION)
           pnpm install --frozen-lockfile
-          pnpm tauri build --bundles deb,appimage
+          pnpm tauri build --bundles deb,appimage $(../../scripts/updater-config.sh)
       - name: 收集安装包
         run: |
           mkdir -p dist
           cp target/release/bundle/deb/*.deb target/release/bundle/appimage/*.AppImage dist/
-          (cd dist && sha256sum * > SHA256SUMS-linux-desktop-x86_64.txt)
+          cp target/release/bundle/deb/*.deb.sig target/release/bundle/appimage/*.AppImage.sig dist/ 2>/dev/null || true
+          (cd dist && sha256sum *.deb *.AppImage > SHA256SUMS-linux-desktop-x86_64.txt)
       - uses: actions/upload-artifact@v4
         with:
           name: tmuxide-desktop-linux-x86_64
@@ -214,7 +222,7 @@ jobs:
           export TMUXIDE_CLOUDFLARED_BIN=$GITHUB_WORKSPACE/vendor/cloudflared/out/cloudflared-macos-${{ matrix.arch }}
           export TMUXIDE_CLOUDFLARED_VERSION=$(cat ../../vendor/cloudflared/out/VERSION)
           pnpm install --frozen-lockfile
-          pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg
+          pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg $(../../scripts/updater-config.sh)
       - name: 校验 .app 签名
         run: |
           APP=$(ls -d target/${{ matrix.target }}/release/bundle/macos/*.app)
@@ -230,6 +238,13 @@ jobs:
           tar -C dist -czf dist/$D.tar.gz $D
           cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/
           (cd dist && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS-macos-${{ matrix.arch }}.txt)
+          # 桌面版升级包（两种架构同名，按架构改名）
+          U=target/${{ matrix.target }}/release/bundle/macos/TmuxIDE.app.tar.gz
+          if [ -f "$U.sig" ]; then
+            A=${{ matrix.arch == 'arm64' && 'aarch64' || 'x64' }}
+            cp "$U" dist/TmuxIDE_${V}_$A.app.tar.gz
+            cp "$U.sig" dist/TmuxIDE_${V}_$A.app.tar.gz.sig
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: tmuxide-macos-${{ matrix.arch }}
@@ -237,6 +252,7 @@ jobs:
             dist/*.tar.gz
             dist/*.dmg
             dist/*.txt
+            dist/*.sig
 
   release:
     name: 发布 GitHub Release
@@ -252,6 +268,23 @@ jobs:
           pattern: tmuxide-*
           path: dist
           merge-multiple: true
+      - name: 生成并签名升级目录
+        env:
+          TAG: ${{ inputs.release_tag || github.ref_name }}
+          MIN_VERSION: ${{ inputs.min_version }}
+        run: |
+          if [ -z "$(tr -d '[:space:]' < crates/tmuxide-update/updater.pub)" ]; then
+            echo "::warning::没有配置升级公钥，这个版本不支持自动升级"
+            exit 0
+          fi
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::程序里有升级公钥，但没有配置 TAURI_SIGNING_PRIVATE_KEY，无法生成签名的升级目录"
+            exit 1
+          fi
+          python3 scripts/update-catalog.py dist "$TAG" "docs/release-notes/$TAG.md" "$MIN_VERSION"
+          (cd apps/desktop && npm install --no-save --no-audit --no-fund @tauri-apps/cli@2.12.1 >/dev/null)
+          apps/desktop/node_modules/.bin/tauri signer sign dist/update.json
+          ls -la dist/update.json* dist/latest*.json
       - run: ls -la dist
       - uses: softprops/action-gh-release@v2
         with:

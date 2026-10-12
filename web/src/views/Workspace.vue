@@ -1,14 +1,39 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+import NewSessionDialog from '../components/NewSessionDialog.vue'
 import SessionTree from '../components/SessionTree.vue'
 import TerminalPane from '../components/TerminalPane.vue'
 import Inspector from '../components/Inspector.vue'
 import Icon from '../components/Icon.vue'
 import { api, enc } from '../api'
 import { t } from '../i18n'
-import { act, currentSession, refreshSessions, state } from '../store'
+import { act, currentSession, groupNames, refreshSessions, setGroupFilter, state } from '../store'
 
 const session = computed(currentSession)
+const groups = computed(groupNames)
+const showNew = ref(false)
+/** 选项卡里的会话：按分组筛选，分组相同的排在一起 */
+const tabSessions = computed(() => {
+  const f = state.groupFilter && groups.value.includes(state.groupFilter) ? state.groupFilter : ''
+  return state.sessions
+    .filter((s) => !f || s.group === f)
+    .slice()
+    .sort((a, b) => (a.group || '\uffff').localeCompare(b.group || '\uffff') || a.name.localeCompare(b.name))
+})
+
+/** 切换会话选项卡后把键盘焦点交给终端 */
+function openTab(name: string) {
+  state.selected = name
+  nextTick(() => document.querySelector<HTMLTextAreaElement>('.center .xterm-helper-textarea')?.focus())
+}
+
+function pickGroup(g: string) {
+  setGroupFilter(g)
+  if (g && session.value?.group !== g) {
+    const first = state.sessions.find((s) => s.group === g)
+    if (first) state.selected = first.name
+  }
+}
 
 async function selectWindow(id: string) {
   try {
@@ -26,6 +51,19 @@ function newWindow() {
   <div class="workspace">
     <SessionTree />
     <main class="center">
+      <div v-if="state.sessions.length" class="stabs">
+        <div v-if="groups.length" class="groups" role="radiogroup" :aria-label="t('groupName')">
+          <button role="radio" :aria-checked="!state.groupFilter" class="chip" :class="{ on: !state.groupFilter || !groups.includes(state.groupFilter) }" @click="pickGroup('')">{{ t('allGroups') }}</button>
+          <button v-for="g in groups" :key="g" role="radio" :aria-checked="state.groupFilter === g" class="chip" :class="{ on: state.groupFilter === g }" @click="pickGroup(g)">{{ g }}</button>
+        </div>
+        <div class="stab-list" role="tablist" :aria-label="t('session')">
+          <button v-for="s in tabSessions" :key="s.id" role="tab" :aria-selected="s.name === state.selected" class="stab mono" :class="{ active: s.name === state.selected }"
+            :title="s.group ? `${s.group} / ${s.name}` : s.name" @click="openTab(s.name)">
+            <span v-if="s.group && !state.groupFilter" class="g">{{ s.group }}</span>{{ s.name }}
+          </button>
+          <button class="stab add" :aria-label="t('newSession')" :title="t('newSession')" @click="showNew = true"><Icon name="plus" :size="14" /></button>
+        </div>
+      </div>
       <template v-if="session">
         <div class="tabs" role="tablist">
           <span class="crumb mono">{{ session.name }} ▸</span>
@@ -33,7 +71,10 @@ function newWindow() {
             @click="selectWindow(w.id)">{{ w.index }}:{{ w.name }}</button>
           <button class="tab add" :aria-label="t('newWindow')" :title="t('newWindow')" @click="newWindow"><Icon name="plus" :size="14" /></button>
         </div>
-        <TerminalPane :key="session.name" :session="session.name" />
+        <!-- 切换会话选项卡时保留终端连接，切回来立即可用 -->
+        <KeepAlive :max="8">
+          <TerminalPane :key="session.name" :session="session.name" />
+        </KeepAlive>
       </template>
       <div v-else class="empty">
         <span class="logo mono">&gt;_</span>
@@ -42,12 +83,25 @@ function newWindow() {
       </div>
     </main>
     <Inspector v-if="session" :session="session" />
+    <NewSessionDialog v-if="showNew" @close="showNew = false" />
   </div>
 </template>
 
 <style scoped>
 .workspace { flex: 1; display: flex; min-height: 0; }
 .center { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.stabs { flex-shrink: 0; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.groups { display: flex; gap: 4px; flex-shrink: 0; padding-right: 10px; border-right: 1px solid var(--border); }
+.chip { height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--border); background: none; color: var(--text-2); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.chip:hover { color: var(--text); }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+.stab-list { display: flex; gap: 4px; overflow-x: auto; min-width: 0; padding: 6px 0; scrollbar-width: thin; }
+.stab { height: 26px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); font-size: 12.5px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.stab:hover { color: var(--text); }
+.stab.active { border-color: var(--accent); color: #fff; background: var(--accent-soft); }
+.stab .g { font-size: 11px; color: var(--muted); }
+.stab.active .g { color: #86efac; }
+.stab.add { padding: 0 8px; }
 .tabs { height: 40px; flex-shrink: 0; display: flex; align-items: flex-end; gap: 2px; padding: 0 12px; background: var(--panel-3); border-bottom: 1px solid var(--border); overflow-x: auto; }
 .crumb { align-self: center; font-size: 12px; color: var(--muted); margin-right: 8px; white-space: nowrap; }
 .tab { height: 34px; padding: 0 16px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; background: none; color: var(--text-2); font-size: 12.5px; cursor: pointer; white-space: nowrap; }

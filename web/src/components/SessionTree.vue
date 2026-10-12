@@ -5,12 +5,23 @@ import Modal from './Modal.vue'
 import NewSessionDialog from './NewSessionDialog.vue'
 import { api, enc, type RestoreResult, type SavedEntry, type SessionInfo } from '../api'
 import { formatTime, t } from '../i18n'
-import { act, state } from '../store'
+import { act, groupNames, state } from '../store'
 
 const localSaved = computed(() => state.saved.filter((s) => s.local))
 const otherSaved = computed(() => state.saved.filter((s) => !s.local))
 
+/** 运行中的会话按分组显示，未分组的放在最后 */
+const grouped = computed(() => {
+  const out: { group: string; sessions: SessionInfo[] }[] = []
+  for (const g of groupNames()) out.push({ group: g, sessions: state.sessions.filter((s) => s.group === g) })
+  const rest = state.sessions.filter((s) => !s.group)
+  if (rest.length) out.push({ group: '', sessions: rest })
+  return out
+})
+const collapsed = ref<Record<string, boolean>>({})
+
 type Pending =
+  | { kind: 'group'; name: string; group: string }
   | { kind: 'kill'; name: string }
   | { kind: 'rename'; name: string; to: string }
   | { kind: 'delete'; entry: SavedEntry }
@@ -37,6 +48,11 @@ async function confirm() {
   if (!p) return
   pending.value = null
   if (p.kind === 'kill') await act(() => api.del(`/sessions/${enc(p.name)}`))
+  if (p.kind === 'group') {
+    const group = p.group.trim()
+    await act(() => api.put(`/sessions/${enc(p.name)}/group`, { group }), () =>
+      group ? t('groupSet', { name: p.name, group }) : t('groupCleared', { name: p.name }))
+  }
   if (p.kind === 'rename') {
     const r = await act(() => api.post(`/sessions/${enc(p.name)}/rename`, { to: p.to }))
     if (r !== undefined && state.selected === p.name) state.selected = p.to
@@ -50,16 +66,23 @@ async function confirm() {
   <nav class="tree scroll" :aria-label="t('session')">
     <div class="sec section-title">{{ t('running') }} <span class="count on">{{ state.sessions.length }}</span></div>
     <div v-if="!state.sessions.length" class="empty">{{ t('none') }}</div>
-    <div v-for="s in state.sessions" :key="s.id" class="row" :class="{ selected: s.name === state.selected }">
+    <template v-for="g in grouped" :key="g.group || '\u0000'">
+    <button v-if="grouped.length > 1 || g.group" class="group" :aria-expanded="!collapsed[g.group]" @click="collapsed[g.group] = !collapsed[g.group]">
+      <span class="caret" :class="{ closed: collapsed[g.group] }">▾</span><Icon name="folder" :size="13" />
+      <span class="gname">{{ g.group || t('ungrouped') }}</span><span class="gcount">{{ g.sessions.length }}</span>
+    </button>
+    <div v-for="s in collapsed[g.group] ? [] : g.sessions" :key="s.id" class="row" :class="{ selected: s.name === state.selected, nested: grouped.length > 1 || g.group }">
       <button class="row-btn" @click="state.selected = s.name; state.view = 'workspace'">
         <span class="dot on" /><span class="mono name">{{ s.name }}</span>
         <span class="meta">{{ s.windows.length }} {{ t('windows') }} · {{ paneCount(s) }} {{ t('panes') }}</span>
       </button>
       <span class="actions">
+        <button class="icon-btn" :aria-label="t('setGroup')" :title="t('setGroup')" @click="pending = { kind: 'group', name: s.name, group: s.group }"><Icon name="folder" :size="13" /></button>
         <button class="icon-btn" :aria-label="t('rename')" :title="t('rename')" @click="pending = { kind: 'rename', name: s.name, to: s.name }"><Icon name="edit" :size="13" /></button>
         <button class="icon-btn" :aria-label="t('close')" :title="t('close')" @click="pending = { kind: 'kill', name: s.name }"><Icon name="power" :size="13" /></button>
       </span>
     </div>
+    </template>
 
     <div class="sec section-title">{{ t('saved') }} <span class="count">{{ state.saved.length }}</span></div>
     <div v-if="!state.saved.length" class="empty">{{ t('none') }}</div>
@@ -94,6 +117,15 @@ async function confirm() {
       <span v-if="state.autosaveMinutes">{{ t('autosaveEvery', { n: state.autosaveMinutes }) }}</span>
     </div>
 
+    <Modal v-if="pending?.kind === 'group'" :title="`${t('setGroup')} · ${pending.name}`" @confirm="confirm" @cancel="pending = null">
+      <label class="field"><span>{{ t('groupName') }}</span><input v-model="pending.group" class="input" list="tmx-groups" maxlength="32" /></label>
+      <datalist id="tmx-groups"><option v-for="g in groupNames()" :key="g" :value="g" /></datalist>
+      <div v-if="groupNames().length" class="pick">
+        <button v-for="g in groupNames()" :key="g" type="button" class="chip" :class="{ on: pending.group === g }" @click="pending.group = g">{{ g }}</button>
+        <button type="button" class="chip" :class="{ on: !pending.group }" @click="pending.group = ''">{{ t('ungrouped') }}</button>
+      </div>
+      <p class="hint">{{ t('groupHint') }}</p>
+    </Modal>
     <Modal v-if="pending?.kind === 'kill'" :title="t('close')" danger :confirm-text="t('close')" @confirm="confirm" @cancel="pending = null">
       {{ t('confirmKill', { name: pending.name }) }}
     </Modal>
@@ -127,6 +159,17 @@ async function confirm() {
 .row.selected .actions { background: var(--accent-soft); }
 .row:hover .actions, .row:focus-within .actions { display: flex; }
 .tpl { color: var(--blue); flex-shrink: 0; }
+.group { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding: 0 12px; border: 0; background: none; color: var(--text-2); font-size: 12.5px; cursor: pointer; text-align: left; }
+.group:hover { color: var(--text); }
+.caret { width: 10px; font-size: 10px; transition: transform .15s; }
+.caret.closed { transform: rotate(-90deg); }
+.gname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gcount { margin-left: auto; font-size: 11px; color: var(--muted); }
+.row.nested .row-btn { padding-left: 30px; }
+.pick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--border); background: none; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.chip.on { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+.hint { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
 .grow { flex: 1; min-height: 12px; }
 .autosave { margin: 0 12px; padding: 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
 .autosave .title { display: flex; align-items: center; gap: 6px; color: var(--text); font-weight: 500; margin-bottom: 2px; }

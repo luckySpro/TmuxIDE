@@ -76,6 +76,12 @@ h1 { margin: 28px 0 8px; font-size: 25px; font-weight: 600; line-height: 1.3; }
 .tabs { display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .tab { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--panel-2); color: #c3cad3; font-size: 13px; white-space: nowrap; cursor: pointer; }
 .tab.on { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+.stabs { padding: 6px 12px; gap: 6px; }
+.stabs .tab { height: 30px; display: inline-flex; align-items: center; gap: 6px; }
+.tab .g { font-size: 11px; color: var(--muted); font-family: inherit; }
+.tab.on .g { color: #86efac; }
+.ghead { margin: 22px 0 -6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; color: #86efac; text-transform: none; }
+.ghead::before { content: '▸ '; color: var(--muted); }
 .term-wrap { flex: 1; min-height: 0; position: relative; background: var(--term); overflow: hidden; }
 .term-wrap.scroll { overflow: auto; -webkit-overflow-scrolling: touch; }
 .term-host { height: 100%; padding: 4px; }

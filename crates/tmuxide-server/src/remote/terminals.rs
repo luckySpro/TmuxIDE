@@ -24,6 +24,8 @@ pub struct TermSession {
     pub name: String,
     /// 电脑上是否有客户端连着
     pub attached: u32,
+    /// 会话分组，未分组为空
+    pub group: String,
     pub windows: Vec<TermWindow>,
 }
 
@@ -95,6 +97,7 @@ fn build(remote: &Remote) -> TermList {
             .map(|s| TermSession {
                 name: s.name.clone(),
                 attached: s.attached,
+                group: s.group.clone(),
                 windows: s
                     .windows
                     .iter()

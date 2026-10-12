@@ -16,22 +16,25 @@ use crate::{
     error::{AppError, AppResult},
     remote::{AdminCaller, Remote},
     service::{RestoreRequest, Service, SettingsView},
+    update::Updater,
 };
 
 #[derive(Clone)]
 struct Ctx {
     svc: Arc<Service>,
     remote: Arc<Remote>,
+    updater: Arc<Updater>,
     token: Arc<String>,
     port: u16,
     /// 经远程端口转发的管理请求（已在远程端口完成设备认证与来源校验）
     remote_admin: bool,
 }
 
-pub fn router(svc: Arc<Service>, remote: Arc<Remote>, token: String, port: u16) -> Router {
+pub fn router(svc: Arc<Service>, remote: Arc<Remote>, updater: Arc<Updater>, token: String, port: u16) -> Router {
     let ctx = Ctx {
         svc,
         remote,
+        updater,
         token: Arc::new(token),
         port,
         remote_admin: false,
@@ -46,10 +49,11 @@ pub fn router(svc: Arc<Service>, remote: Arc<Remote>, token: String, port: u16) 
 
 /// 远程管理使用的接口：由远程端口在设备认证之后转发进来。
 /// 不包含远程访问自身的写接口，远程设备不能给自己或别的设备提权、改 PIN 或配对新设备。
-pub(crate) fn admin_router(svc: Arc<Service>, remote: Arc<Remote>) -> Router {
+pub(crate) fn admin_router(svc: Arc<Service>, remote: Arc<Remote>, updater: Arc<Updater>) -> Router {
     let ctx = Ctx {
         svc,
         remote,
+        updater,
         token: Arc::new(String::new()),
         port: 0,
         remote_admin: true,
@@ -63,6 +67,7 @@ fn routes(remote_admin: bool) -> Router<Ctx> {
         .route("/sessions", get(sessions).post(new_session))
         .route("/sessions/{name}", delete(kill_session))
         .route("/sessions/{name}/rename", post(rename_session))
+        .route("/sessions/{name}/group", put(set_group))
         .route("/sessions/{name}/windows", post(new_window))
         .route("/windows/{id}/select", post(select_window))
         .route("/windows/{id}/rename", post(rename_window))
@@ -84,11 +89,16 @@ fn routes(remote_admin: bool) -> Router<Ctx> {
         .route("/settings", get(settings).put(update_settings))
         .route("/attach", get(attach))
         .route("/remote", get(remote_view))
-        .route("/remote/events", get(remote_events));
+        .route("/remote/events", get(remote_events))
+        .route("/update", get(update_view));
     if remote_admin {
         return r;
     }
-    r.route("/remote/config", put(remote_config))
+    // 安装与重启只能在这台电脑上操作：远程重启会断开远程连接本身
+    r.route("/update/check", post(update_check))
+        .route("/update/install", post(update_install))
+        .route("/update/restart", post(update_restart))
+        .route("/remote/config", put(remote_config))
         .route("/remote/pin", post(remote_pin))
         .route("/remote/pair", post(remote_pair).delete(remote_pair_cancel))
         .route(
@@ -192,6 +202,15 @@ struct Rename {
 
 async fn rename_session(State(ctx): State<Ctx>, Path(name): Path<String>, Json(b): Json<Rename>) -> J {
     ok(run(&ctx, move |s| Ok(s.tmux().rename_session(&name, &b.to)?)).await?)
+}
+
+#[derive(Deserialize)]
+struct Group {
+    group: String,
+}
+
+async fn set_group(State(ctx): State<Ctx>, Path(name): Path<String>, Json(b): Json<Group>) -> J {
+    ok(run(&ctx, move |s| Ok(s.tmux().set_session_group(&name, &b.group)?)).await?)
 }
 
 #[derive(Deserialize)]
@@ -484,4 +503,23 @@ async fn remote_events(State(ctx): State<Ctx>, Query(q): Query<SinceQuery>) -> J
         "seq": r.store.audit_seq(),
         "events": if q.since == 0 { Vec::new() } else { r.store.audit(q.since, 20) },
     }))
+}
+
+// ---------- 自动升级 ----------
+
+async fn update_view(State(ctx): State<Ctx>) -> J {
+    ok(ctx.updater.view())
+}
+
+async fn update_check(State(ctx): State<Ctx>) -> J {
+    ok(ctx.updater.check().await?)
+}
+
+async fn update_install(State(ctx): State<Ctx>) -> J {
+    ok(ctx.updater.install().await?)
+}
+
+async fn update_restart(State(ctx): State<Ctx>) -> J {
+    ctx.updater.restart()?;
+    ok(json!({ "ok": true }))
 }

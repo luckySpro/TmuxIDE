@@ -2,13 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { api, wsUrl, type Me, type TermWindow } from './api'
+import { api, wsUrl, type Me, type TermSession, type TermWindow } from './api'
 import { t } from './i18n'
 
-const props = defineProps<{ session: string; window: string; windows: TermWindow[]; readOnly: boolean }>()
-const emit = defineEmits<{ back: []; select: [window: string]; authLost: [] }>()
+const props = defineProps<{ session: string; window: string; windows: TermWindow[]; sessions: TermSession[]; readOnly: boolean }>()
+const emit = defineEmits<{ back: []; select: [window: string]; switch: [session: string]; authLost: [] }>()
 
 const host = ref<HTMLDivElement>()
+const wrap = ref<HTMLDivElement>()
 const input = ref('')
 const ctrl = ref(false)
 const notice = ref('')
@@ -47,10 +48,28 @@ function sendInput(data: string) {
   send({ type: 'input', data })
 }
 
-/** “保持电脑尺寸”时按屏幕宽度选择字号，太小时允许横向滚动 */
-function autoFont(cols: number) {
-  const width = host.value?.clientWidth ?? 360
-  return Math.max(7, Math.min(14, Math.floor((width - 8) / (cols * 0.602))))
+/** “保持电脑尺寸”时按可用宽度和高度选择字号，整屏放得下就不滚动；放不下时允许滚动 */
+function autoFont(cols: number, rows: number) {
+  const width = wrap.value?.clientWidth ?? 360
+  const height = wrap.value?.clientHeight ?? 600
+  const byWidth = (width - 8) / (cols * 0.602)
+  const byHeight = (height - 8) / (rows * 1.1 * 1.2)
+  return Math.max(7, Math.min(14, Math.floor(Math.min(byWidth, byHeight))))
+}
+
+/** 光标所在行不在可见区域时滚动过去（用户刚手动滚动过则不打扰） */
+let userScrolledAt = 0
+function markScroll() { userScrolledAt = Date.now() }
+function followCursor() {
+  const el = wrap.value
+  if (!el || !term || fitPhone.value || Date.now() - userScrolledAt < 3000) return
+  const screen = term.element?.querySelector('.xterm-screen') as HTMLElement | null
+  if (!screen) return
+  const cell = screen.clientHeight / term.rows
+  const top = screen.offsetTop + term.buffer.active.cursorY * cell
+  if (top < el.scrollTop || top + cell > el.scrollTop + el.clientHeight) {
+    el.scrollTop = Math.max(0, top + cell * 2 - el.clientHeight)
+  }
 }
 
 function build() {
@@ -59,7 +78,7 @@ function build() {
   const rows = current.value?.rows ?? 24
   term = new Terminal({
     fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace",
-    fontSize: fontSize.value || (fitPhone.value ? 12 : autoFont(cols)),
+    fontSize: fontSize.value || (fitPhone.value ? 12 : autoFont(cols, rows)),
     lineHeight: 1.1,
     cursorBlink: !props.readOnly,
     disableStdin: props.readOnly,
@@ -99,8 +118,8 @@ function connect() {
   }))
   ws.binaryType = 'arraybuffer'
   ws.onmessage = (e) => {
-    if (typeof e.data === 'string') term?.write(e.data)
-    else term?.write(new Uint8Array(e.data))
+    if (typeof e.data === 'string') term?.write(e.data, followCursor)
+    else term?.write(new Uint8Array(e.data), followCursor)
   }
   ws.onclose = async () => {
     if (closed || id !== connId) return
@@ -149,10 +168,12 @@ function zoom(delta: number) {
   if (term) {
     term.options.fontSize = fontSize.value
     if (fit) { try { fit.fit() } catch { /* 忽略 */ } }
+    else nextTick(followCursor)
   }
 }
 
 function submit() {
+  userScrolledAt = 0
   const text = input.value
   input.value = ''
   if (ctrl.value && text.length === 1) {
@@ -187,8 +208,14 @@ onMounted(() => {
   reopen()
   observer = new ResizeObserver(() => {
     if (fit) { try { fit.fit() } catch { /* 忽略 */ } }
+    else if (term && !fontSize.value) {
+      // 保持电脑尺寸：窗口大小变化时重新选字号
+      const f = autoFont(term.cols, term.rows)
+      if (f !== term.options.fontSize) term.options.fontSize = f
+      followCursor()
+    }
   })
-  observer.observe(host.value!)
+  observer.observe(wrap.value!)
 })
 
 onBeforeUnmount(() => {
@@ -212,10 +239,15 @@ onBeforeUnmount(() => {
       <button class="icon small" aria-label="A+" @click="zoom(1)">A+</button>
       <span class="badge" :class="{ ro: readOnly }">{{ readOnly ? t('readonly') : t('control') }}</span>
     </header>
+    <nav v-if="sessions.length > 1" class="tabs stabs" aria-label="sessions">
+      <button v-for="s in sessions" :key="s.name" class="tab mono" :class="{ on: s.name === session }" @click="s.name !== session && emit('switch', s.name)">
+        <span v-if="s.group" class="g">{{ s.group }}</span>{{ s.name }}
+      </button>
+    </nav>
     <nav v-if="windows.length > 1" class="tabs" aria-label="windows">
       <button v-for="w in windows" :key="w.id" class="tab mono" :class="{ on: w.id === window }" @click="selectWindow(w.id)">{{ w.index }} {{ w.name }}</button>
     </nav>
-    <div class="term-wrap" :class="{ scroll: !fitPhone }">
+    <div ref="wrap" class="term-wrap" :class="{ scroll: !fitPhone }" @wheel.passive="markScroll" @touchmove.passive="markScroll">
       <div ref="host" class="term-host" />
       <div v-if="notice" class="notice">{{ notice }}</div>
     </div>

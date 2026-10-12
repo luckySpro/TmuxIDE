@@ -90,6 +90,7 @@ pub struct Remote {
     endpoint: Mutex<Endpoint>,
     running: tokio::sync::Mutex<Option<Running>>,
     terms: watch::Sender<Arc<TermList>>,
+    updater: Arc<crate::update::Updater>,
 }
 
 #[derive(Debug, Serialize)]
@@ -136,7 +137,7 @@ pub struct DeviceView {
 }
 
 impl Remote {
-    pub fn new(svc: Arc<Service>) -> anyhow::Result<Arc<Remote>> {
+    pub fn new(svc: Arc<Service>, updater: Arc<crate::update::Updater>) -> anyhow::Result<Arc<Remote>> {
         let store = Store::open(svc.data_dir())?;
         let (terms, _) = watch::channel(Arc::new(TermList::default()));
         Ok(Arc::new(Remote {
@@ -151,7 +152,12 @@ impl Remote {
             endpoint: Mutex::new(Endpoint::default()),
             running: tokio::sync::Mutex::new(None),
             terms,
+            updater,
         }))
+    }
+
+    pub(crate) fn updater(&self) -> Arc<crate::update::Updater> {
+        self.updater.clone()
     }
 
     fn config(&self) -> RemoteConfig {

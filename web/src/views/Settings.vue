@@ -2,12 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import RemoteSettings from '../components/RemoteSettings.vue'
+import UpdatePanel from '../components/UpdatePanel.vue'
 import { api, remoteAdmin, type SettingsView } from '../api'
 import { lang, languages, t } from '../i18n'
 import { act, state, toast } from '../store'
 
 type Section = 'git' | 'save' | 'tmux' | 'remote' | 'general' | 'about'
-const section = ref<Section>(state.settingsSection === 'remote' && !remoteAdmin ? 'remote' : 'git')
+const section = ref<Section>(state.settingsSection === 'remote' && !remoteAdmin ? 'remote' : state.settingsSection === 'about' ? 'about' : 'git')
 const view = ref<SettingsView | null>(null)
 const original = ref('')
 const token = ref('')
@@ -187,6 +188,8 @@ const authOptions = [
               <option v-for="l in languages" :key="l.id" :value="l.id">{{ l.label }}</option>
             </select>
           </label>
+          <div class="toggle"><div><div>{{ t('updAuto') }}</div><div class="hint">{{ t('updAutoHint') }}</div></div>
+            <button class="switch" role="switch" :aria-checked="view.config.ui.check_updates" :aria-label="t('updAuto')" @click="view.config.ui.check_updates = !view.config.ui.check_updates" /></div>
         </section>
       </div>
 
@@ -200,6 +203,8 @@ const authOptions = [
             <dt>{{ t('dataDir') }}</dt><dd class="mono">{{ state.info?.data_dir }}</dd>
             <dt>{{ t('repoDir') }}</dt><dd class="mono">{{ state.info?.repo_dir }}</dd>
           </dl>
+          <h2 class="sub">{{ t('updTitle') }}</h2>
+          <UpdatePanel />
           <p class="hint">© M&amp;J Group · 473276@qq.com · MIT License<br />tmux (ISC) · libevent (BSD-3) · ncurses (MIT) · utf8proc (MIT) · libgit2 (GPLv2 with linking exception) · OpenSSL (Apache-2.0) · libssh2 (BSD-3) · cloudflared (Apache-2.0) · xterm.js (MIT) · Vue (MIT)</p>
         </section>
       </div>
@@ -208,6 +213,7 @@ const authOptions = [
 </template>
 
 <style scoped>
+.card h2.sub { margin-top: 20px; font-size: 14px; }
 .settings { flex: 1; display: flex; min-height: 0; }
 .nav { width: 240px; flex-shrink: 0; padding: 8px 12px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
 .back { display: flex; align-items: center; gap: 6px; padding: 8px 4px 14px; background: none; border: 0; color: var(--text-2); cursor: pointer; font-size: 13px; }

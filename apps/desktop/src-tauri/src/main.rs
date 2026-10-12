@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tmuxide_server::{AppPaths, Remote, ServeOptions};
 
+mod updater;
+
 /// 退出时需要关闭远程访问（例如撤销 Tailscale serve 配置）
 #[derive(Default)]
 struct RemoteSlot(Mutex<Option<Arc<Remote>>>);
@@ -20,11 +22,20 @@ fn main() {
         .init();
 
     let app = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .pubkey(tmuxide_update::pubkey())
+                .build(),
+        )
         .manage(RemoteSlot::default())
         .setup(|app| {
             let paths = AppPaths::default_paths()?;
             // 服务运行在 Tauri 的 tokio 运行时上
-            let handle = tauri::async_runtime::block_on(tmuxide_server::start(ServeOptions { port: 0, paths }));
+            let handle = tauri::async_runtime::block_on(tmuxide_server::start(ServeOptions {
+                port: 0,
+                paths,
+                installer: updater::installer(app.handle()),
+            }));
             let url = match handle {
                 Ok(h) => {
                     *app.state::<RemoteSlot>().0.lock().unwrap() = Some(h.remote.clone());

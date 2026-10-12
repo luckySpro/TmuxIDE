@@ -68,6 +68,12 @@ enum Cmd {
     },
     /// 显示版本、内置 tmux 与数据目录
     Info,
+    /// 检查并安装新版本（校验发布签名后替换当前程序）
+    Update {
+        /// 只检查，不安装
+        #[arg(long)]
+        check: bool,
+    },
     /// 创建一个空的 bare 仓库作为远程仓库（例如放在 NAS 或同步盘上）
     InitRemote {
         path: std::path::PathBuf,
@@ -104,6 +110,9 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     if let Cmd::Serve { port, no_open, pair } = cli.cmd {
         return serve(paths, port, no_open, pair);
     }
+    if let Cmd::Update { check } = cli.cmd {
+        return self_update(check, cli.json);
+    }
     if let Cmd::InitRemote { path, branch } = &cli.cmd {
         tmuxide_git::init_bare(path, branch)?;
         println!("已创建远程仓库：{}", path.display());
@@ -116,7 +125,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Ok(())
     };
     match cli.cmd {
-        Cmd::Serve { .. } | Cmd::InitRemote { .. } => unreachable!(),
+        Cmd::Serve { .. } | Cmd::InitRemote { .. } | Cmd::Update { .. } => unreachable!(),
         Cmd::Ls => {
             let live = svc.sessions()?;
             let saved = svc.saved()?;
@@ -273,7 +282,12 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
 fn serve(paths: AppPaths, port: u16, no_open: bool, pair: bool) -> anyhow::Result<ExitCode> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        let h = tmuxide_server::start(ServeOptions { port, paths }).await?;
+        let h = tmuxide_server::start(ServeOptions {
+            port,
+            paths,
+            installer: std::sync::Arc::new(tmuxide_server::CliInstaller),
+        })
+        .await?;
         let url = h.url();
         println!("TmuxIDE 已启动：{url}");
         println!(
@@ -335,4 +349,67 @@ fn open_browser(url: &str) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+}
+
+/// `tmuxide update`：下载签名的升级目录，校验后替换当前程序
+fn self_update(check_only: bool, json: bool) -> anyhow::Result<ExitCode> {
+    use tmuxide_server::Installer;
+    let current = env!("CARGO_PKG_VERSION");
+    if !tmuxide_update::enabled() {
+        anyhow::bail!(
+            "此版本没有配置升级签名，请到 {} 手动下载",
+            tmuxide_update::release_page(current)
+        );
+    }
+    let catalog = tmuxide_update::fetch_catalog()?;
+    let newer = tmuxide_update::newer(&catalog.version, current);
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "current": current,
+                "latest": catalog.version,
+                "update_available": newer,
+                "required": tmuxide_update::required(&catalog, current),
+            })
+        );
+    }
+    if !newer {
+        if !json {
+            println!("已是最新版本 {current}");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !json {
+        println!("发现新版本 {}（当前 {current}）", catalog.version);
+        if !catalog.notes.is_empty() {
+            println!("{}", catalog.notes.trim());
+        }
+    }
+    if check_only {
+        return Ok(ExitCode::SUCCESS);
+    }
+    let installer = tmuxide_server::CliInstaller;
+    if let Some(reason) = installer.manual_reason() {
+        anyhow::bail!(reason);
+    }
+    let version = catalog.version.clone();
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let last = std::sync::Mutex::new(0u64);
+    let progress = std::sync::Arc::new(move |done: u64, total: u64| {
+        let pct = (done * 100).checked_div(total).unwrap_or(0).min(100);
+        let mut l = last.lock().unwrap();
+        if pct >= *l + 10 || done == total {
+            *l = pct;
+            if !json {
+                eprintln!("下载 {pct}%");
+            }
+        }
+    });
+    rt.block_on(installer.install(catalog, progress))
+        .map_err(anyhow::Error::msg)?;
+    if !json {
+        println!("已升级到 {version}。正在运行的 tmuxide serve 需要重新启动后才会使用新版本；tmux 会话不受影响。");
+    }
+    Ok(ExitCode::SUCCESS)
 }

@@ -1,0 +1,23 @@
+[package]
+name = "tmuxide-update"
+description = "TmuxIDE update catalog: signed release catalog, mirror fallback and command-line self-update"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+ureq = "3"
+minisign-verify = "0.3"
+base64 = "0.22"
+semver = "1"
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
+
+[dev-dependencies]
+tempfile.workspace = true

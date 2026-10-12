@@ -14,6 +14,9 @@ const zh = {
   interrupt: '^C 中断', clear: '清屏', keyboard: '键盘', reconnecting: '终端已断开，正在重连…',
   ended: '会话已结束', back: '返回终端列表', readonlyNote: '这台设备是只读的，只能查看',
   error: '出错了', manage: '管理',
+  tunnelAuth: '需要重新通过 Cloudflare 邮箱验证，正在跳转…',
+  tunnelAuthFailed: 'Cloudflare 邮箱验证没有生效（浏览器可能拦截了 Cookie）。请换用系统默认浏览器打开，或在电脑上清空“允许的邮箱”。',
+  ungrouped: '未分组',
 }
 type Key = keyof typeof zh
 const en: Record<Key, string> = {
@@ -32,6 +35,9 @@ const en: Record<Key, string> = {
   interrupt: '^C', clear: 'Clear', keyboard: 'Keyboard', reconnecting: 'Terminal disconnected, reconnecting…',
   ended: 'Session ended', back: 'Back to terminals', readonlyNote: 'This device is read-only',
   error: 'Error', manage: 'Manage',
+  tunnelAuth: 'Cloudflare email verification is needed again, redirecting…',
+  tunnelAuthFailed: 'Cloudflare email verification did not stick (the browser may be blocking cookies). Open the link in your default browser, or clear “Allowed emails” on the computer.',
+  ungrouped: 'Ungrouped',
 }
 
 const dict: Record<Key, string> = navigator.language.toLowerCase().startsWith('zh') ? zh : en

@@ -5,6 +5,7 @@ members = [
     "crates/tmuxide-tmux",
     "crates/tmuxide-git",
     "crates/tmuxide-server",
+    "crates/tmuxide-update",
     "apps/cli",
     "apps/desktop/src-tauri",
 ]
@@ -13,11 +14,12 @@ default-members = [
     "crates/tmuxide-tmux",
     "crates/tmuxide-git",
     "crates/tmuxide-server",
+    "crates/tmuxide-update",
     "apps/cli",
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["M&J Group <473276@qq.com>"]
 license = "MIT"
@@ -28,6 +30,7 @@ tmuxide-core = { path = "crates/tmuxide-core" }
 tmuxide-tmux = { path = "crates/tmuxide-tmux" }
 tmuxide-git = { path = "crates/tmuxide-git" }
 tmuxide-server = { path = "crates/tmuxide-server" }
+tmuxide-update = { path = "crates/tmuxide-update" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

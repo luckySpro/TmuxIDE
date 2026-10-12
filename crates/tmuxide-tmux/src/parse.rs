@@ -1,9 +1,9 @@
 use serde::Serialize;
 
-const SEP: &str = "|~|";
+pub(crate) const SEP: &str = "|~|";
 
 /// list-panes -a 的输出格式；字段之间用不太可能出现在名字中的分隔符连接
-pub const PANE_FORMAT: &str = "#{session_name}|~|#{session_id}|~|#{session_attached}|~|#{session_created}|~|#{window_index}|~|#{window_id}|~|#{window_active}|~|#{window_layout}|~|#{pane_index}|~|#{pane_id}|~|#{pane_active}|~|#{pane_pid}|~|#{pane_width}|~|#{pane_height}|~|#{pane_current_command}|~|#{pane_current_path}|~|#{window_name}";
+pub const PANE_FORMAT: &str = "#{session_name}|~|#{session_id}|~|#{session_attached}|~|#{session_created}|~|#{window_index}|~|#{window_id}|~|#{window_active}|~|#{window_layout}|~|#{pane_index}|~|#{pane_id}|~|#{pane_active}|~|#{pane_pid}|~|#{pane_width}|~|#{pane_height}|~|#{pane_current_command}|~|#{pane_current_path}|~|#{@tmuxide-group}|~|#{window_name}";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SessionInfo {
@@ -11,6 +11,8 @@ pub struct SessionInfo {
     pub id: String,
     pub attached: u32,
     pub created: u64,
+    /// 用户给会话设置的分组（tmux 会话选项 `@tmuxide-group`），未分组为空
+    pub group: String,
     pub windows: Vec<WindowInfo>,
 }
 
@@ -40,8 +42,8 @@ pub fn parse_panes(text: &str) -> Vec<SessionInfo> {
     let mut sessions: Vec<SessionInfo> = Vec::new();
     for line in text.lines() {
         // 窗口名放在最后，即使包含分隔符也不会错位
-        let f: Vec<&str> = line.splitn(17, SEP).collect();
-        if f.len() != 17 {
+        let f: Vec<&str> = line.splitn(18, SEP).collect();
+        if f.len() != 18 {
             continue;
         }
         let num = |s: &str| s.parse::<u64>().unwrap_or(0);
@@ -63,6 +65,7 @@ pub fn parse_panes(text: &str) -> Vec<SessionInfo> {
                     id: f[1].to_string(),
                     attached: num(f[2]) as u32,
                     created: num(f[3]),
+                    group: f[16].to_string(),
                     windows: Vec::new(),
                 });
                 sessions.len() - 1
@@ -75,7 +78,7 @@ pub fn parse_panes(text: &str) -> Vec<SessionInfo> {
                 s.windows.push(WindowInfo {
                     index: num(f[4]) as u32,
                     id: f[5].to_string(),
-                    name: f[16].to_string(),
+                    name: f[17].to_string(),
                     active: f[6] == "1",
                     layout: f[7].to_string(),
                     panes: Vec::new(),
@@ -101,14 +104,15 @@ mod tests {
 
     #[test]
     fn parses_list_panes() {
-        let text = "dev|~|$0|~|1|~|1700000000|~|1|~|@0|~|1|~|b25d,80x24,0,0{40x24,0,0,0,39x24,41,0,1}|~|0|~|%0|~|1|~|100|~|40|~|24|~|nvim|~|/home/u/app|~|editor\n\
-dev|~|$0|~|1|~|1700000000|~|1|~|@0|~|1|~|b25d,80x24,0,0{40x24,0,0,0,39x24,41,0,1}|~|1|~|%1|~|0|~|101|~|39|~|24|~|zsh|~|/home/u/app|~|editor\n\
-dev|~|$0|~|1|~|1700000000|~|2|~|@1|~|0|~|abcd,80x24,0,0,2|~|0|~|%2|~|1|~|102|~|80|~|24|~|zsh|~|/tmp|~|odd|~|name\n";
+        let text = "dev|~|$0|~|1|~|1700000000|~|1|~|@0|~|1|~|b25d,80x24,0,0{40x24,0,0,0,39x24,41,0,1}|~|0|~|%0|~|1|~|100|~|40|~|24|~|nvim|~|/home/u/app|~|工作|~|editor\n\
+dev|~|$0|~|1|~|1700000000|~|1|~|@0|~|1|~|b25d,80x24,0,0{40x24,0,0,0,39x24,41,0,1}|~|1|~|%1|~|0|~|101|~|39|~|24|~|zsh|~|/home/u/app|~|工作|~|editor\n\
+dev|~|$0|~|1|~|1700000000|~|2|~|@1|~|0|~|abcd,80x24,0,0,2|~|0|~|%2|~|1|~|102|~|80|~|24|~|zsh|~|/tmp|~|工作|~|odd|~|name\n";
         let s = parse_panes(text);
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].windows.len(), 2);
         assert_eq!(s[0].windows[0].panes.len(), 2);
         assert_eq!(s[0].windows[1].name, "odd|~|name");
         assert!(s[0].windows[0].panes[0].active);
+        assert_eq!(s[0].group, "工作");
     }
 }

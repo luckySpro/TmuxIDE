@@ -249,3 +249,23 @@ TmuxIDE/
 - CI：Linux x86_64 与 macOS arm64 用 `scripts/remote-smoke.sh` 经真实 Cloudflare 快速隧道跑通配对、认证与终端连接；Linux arm64 跑本机端口模式。
 - 远程管理（设备级选项，默认关闭）：授权设备在远程地址 `/admin` 使用完整界面，接口经 `/api/admin` 转发到本机接口的子集（不含远程访问的写接口）；需要 PIN；每个写操作记入访问记录。已用 Playwright 验证。
 - 未验证：Tailscale 两种模式（需要已登录 tailnet 的机器）、Cloudflare 自有域名模式（需要 Tunnel Token）、真机 iOS/Android 浏览器。
+
+## 9. 自动升级、会话选项卡与分组（v0.3.0，2026-10-12）
+
+### 9.1 升级
+- 升级单位：桌面版为整个应用（macOS `.app.tar.gz`、Linux AppImage / deb，由 Tauri 升级插件安装）；命令行版为单个 `tmuxide` 可执行文件。tmux 会话在独立的 tmux 服务里，不受升级影响。
+- 签名：CI 用 `TAURI_SIGNING_PRIVATE_KEY`（GitHub Secrets）签名桌面版安装包和 `update.json`；程序只内置公钥（`crates/tmuxide-update/updater.pub`）。私钥不进仓库。
+- 目录：`update.json`（版本、最低支持版本、说明、命令行版各平台地址与 SHA-256、桌面版各平台安装包签名）+ `update.json.sig`；`latest.json` / `latest-mirror.json` 供 Tauri 插件读取。Tauri 的 latest.json 本身没有签名，桌面版安装前核对其版本和安装包签名与已签名的 update.json 一致。
+- 下载：GH-Proxy 加速优先，失败回到 github.com；地址按正式标签构造。
+- 防降级：缓存保存目录原文与签名，读取时重新校验；比已知目录旧的目录不采用。
+- 必需升级：`min_version` 来自已签名目录，界面弹出无法关闭的对话框。
+- 发布：`workflow_dispatch` 输入 `release_tag` 与可选的 `min_version`；`updater.pub` 非空而 Secrets 缺失时发布失败，公钥为空时跳过升级目录并给出警告。
+
+### 9.2 会话选项卡与分组
+- 分组保存在 tmux 会话选项 `@tmuxide-group`，随会话改名保留，不另建存储。
+- 工作区顶部会话选项卡（KeepAlive 保留最多 8 个终端连接）和分组筛选；会话树按分组折叠。
+- 手机页面按分组排列，终端页顶部可切换会话。
+
+### 9.3 实施状态
+- 已完成并在本机验证：命令行版完整自升级与篡改拒绝（测试密钥）、桌面版 deb / AppImage 升级包生成与签名、界面必需升级弹窗（Esc 与点击背景无法关闭）、选项卡与分组、远程页面回归。
+- 未验证：桌面版应用内安装与重启（需要真实 macOS / Linux 桌面）。首次真实自动升级将发生在 0.3.0 之后的版本。

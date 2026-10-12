@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { attachUrl } from '../api'
+import { state } from '../store'
 
 const props = defineProps<{ session: string }>()
 const host = ref<HTMLDivElement>()
@@ -19,6 +20,8 @@ function send(msg: object) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
 
+const exists = () => state.sessions.some((s) => s.name === props.session)
+
 function connect() {
   if (!term) return
   ws = new WebSocket(attachUrl(props.session, term.cols, term.rows))
@@ -29,7 +32,8 @@ function connect() {
   }
   ws.onclose = () => {
     // tmux 客户端意外断开（例如服务重启）时自动重连；会话被关闭时列表刷新会卸载本组件
-    if (!closed) retry = window.setTimeout(connect, 1500)
+    // 被选项卡缓存的终端：会话已关闭或改名时不再重连
+    if (!closed && exists()) retry = window.setTimeout(connect, 1500)
   }
 }
 
@@ -55,11 +59,22 @@ onMounted(() => {
   term.onData((data) => send({ type: 'input', data }))
   term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }))
   observer = new ResizeObserver(() => {
+    // 切到其他选项卡时终端被移出页面，尺寸为 0，不能据此缩小 tmux 窗口
+    if (!host.value?.isConnected || !host.value.clientWidth || !host.value.clientHeight) return
     try { fit.fit() } catch { /* 容器隐藏时忽略 */ }
   })
   observer.observe(host.value!)
   connect()
   term.focus()
+})
+
+onActivated(() => {
+  try { fit.fit() } catch { /* 忽略 */ }
+  if (ws?.readyState === WebSocket.CLOSED && exists()) {
+    window.clearTimeout(retry)
+    connect()
+  }
+  term?.focus()
 })
 
 onBeforeUnmount(() => {

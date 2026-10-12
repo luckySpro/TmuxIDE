@@ -73,6 +73,22 @@ const zh: Dict = {
   enableRemote: '开启远程访问', remoteSaved: '远程访问设置已保存',
 }
 
+Object.assign(zh, {
+  allGroups: '全部', ungrouped: '未分组', setGroup: '设置分组', groupName: '分组',
+  groupHint: '选择已有分组，或输入新名称新建分组；留空表示移出分组。',
+  groupSet: '已把 {name} 移到 {group}', groupCleared: '已把 {name} 移出分组', copy: '复制', copied: '已复制',
+  copyPairLink: '复制配对链接（含配对码）',
+  updTitle: '软件升级', updDisabled: '此版本没有配置升级签名，请到发布页手动下载新版本', updChecking: '正在检查更新…',
+  updDownloading: '正在下载 {v}', updReady: '{v} 已安装，重启后生效', updReadyCli: '{v} 已安装，重新启动 tmuxide 后生效',
+  updRequired: '必须升级到 {v}', updAvailable: '有新版本 {v}', updLatest: '已是最新版本', updFailed: '检查更新失败',
+  updIdle: '还没有检查更新', updCurrent: '当前版本 {v}', updCheckedAt: '{time} 检查', updRestart: '立即重启',
+  updInstall: '下载并安装', updCheck: '检查更新', updRemoteOnly: '请在这台电脑上安装升级（远程管理不能安装）',
+  updReleasePage: '在发布页查看或手动下载', updGateTitle: '需要升级 TmuxIDE',
+  updGateText: '当前版本已不再支持，请升级后继续使用。正在运行的 tmux 会话不受影响。',
+  updAuto: '自动检查更新', updAutoHint: '启动后和每 6 小时检查一次；安装前会校验发布签名',
+  updBar: '新版本 {v}', updBarReady: '升级已就绪，重启生效',
+})
+
 const en: Dict = {
   newSession: 'New session', saveSnapshot: 'Save snapshot', restoreAll: 'Restore all', sync: 'Sync', settings: 'Settings',
   search: 'Search sessions or commands…', running: 'Running', saved: 'Saved', templates: 'Templates', none: '(none)',
@@ -142,6 +158,18 @@ const en: Dict = {
   remoteOnlyTermText: 'Phones can only view and type into terminals; they cannot change settings, Git or delete snapshots. The remote port listens on this computer only; outside traffic arrives through the tunnel.',
   remoteNotice: '{device} {detail}', remoteBar: 'Remote', remoteBarTerminals: '{n} terminals opened remotely',
   enableRemote: 'Enable remote access', remoteSaved: 'Remote access settings saved',
+  allGroups: 'All', ungrouped: 'Ungrouped', setGroup: 'Move to group', groupName: 'Group',
+  groupHint: 'Pick an existing group or type a new name. Leave empty to remove from its group.',
+  groupSet: '{name} moved to {group}', groupCleared: '{name} removed from its group', copy: 'Copy', copied: 'Copied', copyPairLink: 'Copy pairing link (includes code)',
+  updTitle: 'Updates', updDisabled: 'This build has no update signing key; download new versions from the release page',
+  updChecking: 'Checking for updates…', updDownloading: 'Downloading {v}', updReady: '{v} is installed; restart to use it',
+  updReadyCli: '{v} is installed; restart tmuxide to use it', updRequired: 'Update to {v} is required', updAvailable: '{v} is available',
+  updLatest: 'You are up to date', updFailed: 'Update check failed', updIdle: 'Not checked yet', updCurrent: 'Current version {v}',
+  updCheckedAt: 'checked {time}', updRestart: 'Restart now', updInstall: 'Download and install', updCheck: 'Check for updates',
+  updRemoteOnly: 'Install the update on that computer (remote management cannot install)', updReleasePage: 'Open the release page',
+  updGateTitle: 'TmuxIDE needs an update', updGateText: 'This version is no longer supported. Running tmux sessions are not affected.',
+  updAuto: 'Check for updates automatically', updAutoHint: 'At startup and every 6 hours; release signatures are verified before installing',
+  updBar: 'Update {v}', updBarReady: 'Update ready, restart to apply',
 }
 
 const dicts: Record<string, Dict> = { 'zh-CN': zh, en }

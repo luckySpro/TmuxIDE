@@ -32,7 +32,7 @@ impl AppError {
             AppError::BadRequest(_) | AppError::Core(_) => StatusCode::BAD_REQUEST,
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::Conflict(_) => StatusCode::CONFLICT,
-            AppError::Tmux(TmuxError::BadName(_)) => StatusCode::BAD_REQUEST,
+            AppError::Tmux(TmuxError::BadName(_) | TmuxError::BadGroup(_)) => StatusCode::BAD_REQUEST,
             AppError::Tmux(TmuxError::NoSession(_)) => StatusCode::NOT_FOUND,
             AppError::Tmux(TmuxError::Exists(_)) => StatusCode::CONFLICT,
             AppError::Git(GitError::Conflict(_)) => StatusCode::CONFLICT,

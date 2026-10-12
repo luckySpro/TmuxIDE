@@ -78,6 +78,28 @@ fn rejects_bad_names_and_duplicates() {
 }
 
 #[test]
+fn session_groups_survive_rename() {
+    let Some((t, _dir)) = tmux("groups") else { return };
+    t.new_session("g1", None).unwrap();
+    t.set_session_group("g1", "工作 项目").unwrap();
+    t.rename_session("g1", "g2").unwrap();
+    let group = |name: &str| {
+        t.sessions()
+            .unwrap()
+            .into_iter()
+            .find(|s| s.name == name)
+            .unwrap()
+            .group
+    };
+    assert_eq!(group("g2"), "工作 项目");
+    assert!(t.set_session_group("g2", "a|~|b").is_err());
+    assert!(t.set_session_group("missing", "x").is_err());
+    t.set_session_group("g2", "").unwrap();
+    assert_eq!(group("g2"), "");
+    let _ = t.run(&["kill-server"]);
+}
+
+#[test]
 fn grouped_sessions_are_hidden_and_captured() {
     let Some((t, _dir)) = tmux("grouped") else { return };
     t.new_session("main", None).unwrap();

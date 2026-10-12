@@ -31,6 +31,8 @@ pub enum TmuxError {
     Command(String),
     #[error("会话名 {0:?} 不合法（只能包含字母、数字、- 和 _）")]
     BadName(String),
+    #[error("分组名 {0:?} 不合法（最多 32 个字符，不能包含 |~| 或控制字符）")]
+    BadGroup(String),
     #[error("会话 {0} 不存在")]
     NoSession(String),
     #[error("会话 {0} 已存在")]
@@ -302,6 +304,25 @@ impl Tmux {
 
     pub fn kill_session(&self, name: &str) -> Result<()> {
         self.run(&["kill-session", "-t", &format!("={name}")]).map(|_| ())
+    }
+
+    /// 设置会话分组（保存在 tmux 会话选项里，改名后仍然保留）；空字符串表示移出分组
+    pub fn set_session_group(&self, session: &str, group: &str) -> Result<()> {
+        let group = group.trim();
+        if group.chars().count() > 32 || group.contains(parse::SEP) || group.chars().any(char::is_control) {
+            return Err(TmuxError::BadGroup(group.to_string()));
+        }
+        if !self.has_session(session) || is_hidden(session) {
+            return Err(TmuxError::NoSession(session.to_string()));
+        }
+        let target = format!("={session}:");
+        if group.is_empty() {
+            self.run(&["set-option", "-u", "-t", &target, "@tmuxide-group"])
+                .map(|_| ())
+        } else {
+            self.run(&["set-option", "-t", &target, "@tmuxide-group", group])
+                .map(|_| ())
+        }
     }
 
     pub fn rename_session(&self, from: &str, to: &str) -> Result<()> {
