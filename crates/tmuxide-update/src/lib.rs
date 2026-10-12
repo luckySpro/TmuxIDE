@@ -82,17 +82,35 @@ pub fn release_page(version: &str) -> String {
     )
 }
 
-fn agent() -> ureq::Agent {
+fn agent(platform_roots: bool) -> ureq::Agent {
+    let roots = if platform_roots {
+        ureq::tls::RootCerts::PlatformVerifier
+    } else {
+        ureq::tls::RootCerts::WebPki
+    };
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(120)))
         .timeout_connect(Some(Duration::from_secs(10)))
         .user_agent(format!("TmuxIDE/{}", env!("CARGO_PKG_VERSION")))
+        .tls_config(ureq::tls::TlsConfig::builder().root_certs(roots).build())
         .build()
         .into()
 }
 
+/// 先用内置根证书；证书不被信任时（例如公司网络的 HTTPS 代理）改用系统信任的证书再试一次
+fn call(url: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    match agent(false).get(url).call() {
+        Ok(r) => Ok(r),
+        Err(e) if e.to_string().contains("certificate") => {
+            tracing::info!("{url}：内置根证书不信任对方证书（{e}），改用系统证书");
+            agent(true).get(url).call().with_context(|| format!("下载 {url} 失败"))
+        }
+        Err(e) => Err(e).with_context(|| format!("下载 {url} 失败")),
+    }
+}
+
 fn get(url: &str, limit: u64) -> Result<Vec<u8>> {
-    let resp = agent().get(url).call().with_context(|| format!("下载 {url} 失败"))?;
+    let resp = call(url)?;
     let mut buf = Vec::new();
     resp.into_body()
         .into_reader()
@@ -198,7 +216,7 @@ pub fn download_package(p: &Package, mut progress: impl FnMut(u64, u64)) -> Resu
     let mut last = anyhow!("没有可用的下载地址");
     for url in sources(&p.url) {
         let r = (|| -> Result<Vec<u8>> {
-            let resp = agent().get(&url).call().with_context(|| format!("下载 {url} 失败"))?;
+            let resp = call(&url)?;
             // 只读到目录给出的大小多 1 字节：更大的内容直接判为不一致
             let mut reader = resp.into_body().into_reader().take(p.size + 1);
             let mut buf = Vec::with_capacity(p.size as usize);
