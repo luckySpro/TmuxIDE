@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
-import { api, ApiError, type AppInfo, type SavedEntry, type SessionInfo, type SyncStatus, type TemplateEntry } from './api'
-import { lang } from './i18n'
+import { api, ApiError, type AppInfo, type RemoteSummary, type SavedEntry, type SessionInfo, type SyncStatus, type TemplateEntry } from './api'
+import { lang, t } from './i18n'
 
 export type View = 'workspace' | 'settings' | 'history'
 
@@ -19,6 +19,9 @@ export const state = reactive({
   toasts: [] as Toast[],
   busy: false,
   authError: false,
+  remote: null as RemoteSummary | null,
+  /** 从状态栏点进设置时直接打开某个分区 */
+  settingsSection: '' as string,
 })
 
 let toastId = 0
@@ -91,6 +94,25 @@ export async function init() {
   await refreshAll()
   setInterval(refreshSessions, 2500)
   setInterval(refreshAll, 15000)
+  pollRemote()
+  setInterval(pollRemote, 4000)
+}
+
+/** 有手机配对、打开终端或认证失败时在电脑上提醒 */
+const NOTIFY_KINDS = ['pair', 'attach', 'pair_fail', 'unlock_fail', 'locked', 'expire']
+async function pollRemote() {
+  try {
+    const since = state.remote?.seq ?? 0
+    const r = await api.get<RemoteSummary>(`/remote/events?since=${since}`)
+    if (since && r.notify) {
+      for (const e of [...r.events].reverse()) {
+        if (!NOTIFY_KINDS.includes(e.kind)) continue
+        const bad = e.kind.endsWith('_fail') || e.kind === 'locked'
+        toast(`${t('remoteBar')}：${t('remoteNotice', { device: e.device ?? '', detail: e.detail })}`, bad ? 'error' : 'ok')
+      }
+    }
+    state.remote = r
+  } catch { /* 旧版服务或暂时不可用 */ }
 }
 
 export function currentSession(): SessionInfo | undefined {

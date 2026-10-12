@@ -3,8 +3,14 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tauri::{WebviewUrl, WebviewWindowBuilder};
-use tmuxide_server::{AppPaths, ServeOptions};
+use std::sync::{Arc, Mutex};
+
+use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tmuxide_server::{AppPaths, Remote, ServeOptions};
+
+/// 退出时需要关闭远程访问（例如撤销 Tailscale serve 配置）
+#[derive(Default)]
+struct RemoteSlot(Mutex<Option<Arc<Remote>>>);
 
 fn main() {
     tracing_subscriber::fmt()
@@ -13,13 +19,17 @@ fn main() {
         )
         .init();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        .manage(RemoteSlot::default())
         .setup(|app| {
             let paths = AppPaths::default_paths()?;
             // 服务运行在 Tauri 的 tokio 运行时上
             let handle = tauri::async_runtime::block_on(tmuxide_server::start(ServeOptions { port: 0, paths }));
             let url = match handle {
-                Ok(h) => h.url(),
+                Ok(h) => {
+                    *app.state::<RemoteSlot>().0.lock().unwrap() = Some(h.remote.clone());
+                    h.url()
+                }
                 Err(e) => {
                     let msg = format!("TmuxIDE 启动失败：{e:#}");
                     tracing::error!("{msg}");
@@ -34,8 +44,16 @@ fn main() {
                 .build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("TmuxIDE 运行失败");
+    app.run(|app, event| {
+        if let RunEvent::Exit = event {
+            let remote = app.state::<RemoteSlot>().0.lock().unwrap().take();
+            if let Some(r) = remote {
+                tauri::async_runtime::block_on(r.stop());
+            }
+        }
+    });
 }
 
 fn error_page(msg: &str) -> String {

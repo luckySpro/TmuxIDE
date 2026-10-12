@@ -10,6 +10,7 @@
 - **保存与恢复**：保存窗口、分屏布局、工作目录和正在运行的命令；可按历史版本恢复，同名会话可选择恢复为新会话 / 替换 / 跳过。
 - **Git 同步**：快照是人类可读的 TOML，每次保存一个提交；支持 SSH 密钥、ssh-agent、HTTPS Token；每台电脑写自己的目录，多机同步不冲突。
 - **一次安装，没有其他依赖**：tmux 静态编译后嵌入程序；Git 使用静态链接的 libgit2（含 libssh2、OpenSSL），不需要系统 git；前端资源和字体都在二进制里，运行时不联网。
+- **手机远程访问**（0.2 起）：用手机或平板查看、控制电脑上正在运行的终端。网络可选 Cloudflare 快速隧道（内置 cloudflared，不需要账号）、Cloudflare 自有域名、Tailscale，或自己的反向代理；必须先在电脑上扫码配对，每台设备有独立凭证，可加 PIN、设为只读、随时移除，所有访问都有记录。
 - **隔离**：TmuxIDE 使用专用 tmux socket（默认 `tmuxide`），不影响你自己的 tmux；仍会加载 `~/.tmux.conf`。
 
 ## 下载
@@ -42,6 +43,8 @@ tmuxide history dev
 tmuxide tmux attach -t dev    # 直接使用内置 tmux
 tmuxide init-remote /Volumes/NAS/tmux-sessions.git   # 在 NAS / 同步盘上建一个远程仓库
 ```
+
+远程访问在“设置 → 远程访问”中开启（桌面版和 `tmuxide serve` 打开的网页相同）；开启后也可以用 `tmuxide serve --pair` 在终端里显示配对二维码。
 
 在服务器上使用：`tmuxide serve --port 7878 --no-open`，再在本机 `ssh -L 7878:127.0.0.1:7878 服务器`，用输出的地址打开。
 
@@ -79,9 +82,10 @@ cd apps/desktop && pnpm install && pnpm tauri dev # 桌面版
 | `apps/desktop` | Tauri 2 桌面壳 |
 | `web` | Vue 3 + xterm.js 界面 |
 | `vendor/tmux` | 内置 tmux 的固定版本、校验值与构建脚本 |
+| `vendor/cloudflared` | 内置 cloudflared 的固定版本、校验值与下载脚本 |
 
 规划见 [docs/PLAN.md](docs/PLAN.md)。
 
 ## 第三方许可
 
-tmux (ISC) · libevent (BSD-3-Clause) · ncurses (MIT) · utf8proc (MIT) · libgit2 (GPL-2.0 with linking exception) · libssh2 (BSD-3-Clause) · OpenSSL (Apache-2.0) · xterm.js (MIT) · Vue (MIT) · Tauri (MIT/Apache-2.0) · JetBrains Mono (OFL-1.1)
+tmux (ISC) · libevent (BSD-3-Clause) · ncurses (MIT) · utf8proc (MIT) · libgit2 (GPL-2.0 with linking exception) · libssh2 (BSD-3-Clause) · OpenSSL (Apache-2.0) · cloudflared (Apache-2.0) · xterm.js (MIT) · Vue (MIT) · Tauri (MIT/Apache-2.0) · JetBrains Mono (OFL-1.1)

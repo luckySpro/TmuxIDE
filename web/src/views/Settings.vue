@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
+import RemoteSettings from '../components/RemoteSettings.vue'
 import { api, type SettingsView } from '../api'
 import { lang, languages, t } from '../i18n'
 import { act, state, toast } from '../store'
 
-type Section = 'git' | 'save' | 'tmux' | 'general' | 'about'
-const section = ref<Section>('git')
+type Section = 'git' | 'save' | 'tmux' | 'remote' | 'general' | 'about'
+const section = ref<Section>(state.settingsSection === 'remote' ? 'remote' : 'git')
 const view = ref<SettingsView | null>(null)
 const original = ref('')
 const token = ref('')
@@ -16,7 +17,7 @@ const exclude = ref('')
 
 const sections: { id: Section; label: string }[] = [
   { id: 'git', label: 'git' }, { id: 'save', label: 'savePolicy' }, { id: 'tmux', label: 'tmuxConf' },
-  { id: 'general', label: 'general' }, { id: 'about', label: 'about' },
+  { id: 'remote', label: 'remoteAccess' }, { id: 'general', label: 'general' }, { id: 'about', label: 'about' },
 ]
 
 async function load() {
@@ -81,7 +82,7 @@ const authOptions = [
     <div v-if="view" class="content scroll">
       <div class="header">
         <h1>{{ t(sections.find((s) => s.id === section)!.label) }}</h1>
-        <div class="actions">
+        <div v-if="section !== 'remote'" class="actions">
           <button class="btn" :disabled="!dirty" @click="load">{{ t('discard') }}</button>
           <button class="btn primary" :disabled="!dirty || state.busy" @click="save">{{ t('saveSettings') }}</button>
         </div>
@@ -158,6 +159,8 @@ const authOptions = [
         </div>
       </div>
 
+      <RemoteSettings v-else-if="section === 'remote'" />
+
       <div v-else-if="section === 'save'" class="narrow-col">
         <section class="card">
           <label class="field"><span>{{ t('autosaveMinutes') }}</span><input v-model.number="view.config.save.autosave_minutes" type="number" min="0" max="1440" class="input short" /></label>
@@ -197,7 +200,7 @@ const authOptions = [
             <dt>{{ t('dataDir') }}</dt><dd class="mono">{{ state.info?.data_dir }}</dd>
             <dt>{{ t('repoDir') }}</dt><dd class="mono">{{ state.info?.repo_dir }}</dd>
           </dl>
-          <p class="hint">© M&amp;J Group · 473276@qq.com · MIT License<br />tmux (ISC) · libevent (BSD-3) · ncurses (MIT) · utf8proc (MIT) · libgit2 (GPLv2 with linking exception) · OpenSSL (Apache-2.0) · libssh2 (BSD-3) · xterm.js (MIT) · Vue (MIT)</p>
+          <p class="hint">© M&amp;J Group · 473276@qq.com · MIT License<br />tmux (ISC) · libevent (BSD-3) · ncurses (MIT) · utf8proc (MIT) · libgit2 (GPLv2 with linking exception) · OpenSSL (Apache-2.0) · libssh2 (BSD-3) · cloudflared (Apache-2.0) · xterm.js (MIT) · Vue (MIT)</p>
         </section>
       </div>
     </div>

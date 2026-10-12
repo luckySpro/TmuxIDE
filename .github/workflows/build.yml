@@ -71,6 +71,8 @@ jobs:
         with:
           name: web-dist
           path: web/dist
+      - name: 下载并校验内置 cloudflared
+        run: OS=linux ARCH=${{ matrix.arch }} vendor/cloudflared/fetch.sh
       - name: 在 Alpine 中静态编译 tmux 与 tmuxide，并在无 tmux、无 git 的环境中冒烟测试
         run: |
           docker run --rm -v "$PWD":/src -w /src -e ARCH=${{ matrix.arch }} alpine:3.20 sh -euc '
@@ -80,18 +82,22 @@ jobs:
             . "$HOME/.cargo/env"
             export TMUXIDE_TMUX_BIN=$PWD/vendor/tmux/out/tmux-linux-$ARCH
             export TMUXIDE_TMUX_VERSION=$(cat vendor/tmux/out/VERSION)
+            export TMUXIDE_CLOUDFLARED_BIN=$PWD/vendor/cloudflared/out/cloudflared-linux-$ARCH
+            export TMUXIDE_CLOUDFLARED_VERSION=$(cat vendor/cloudflared/out/VERSION)
             cargo build --release --locked -p tmuxide-cli
             file target/release/tmuxide
             if command -v git || command -v tmux; then echo "测试环境不应有系统 git/tmux"; exit 1; fi
             scripts/smoke.sh target/release/tmuxide
           '
+      - name: 远程访问冒烟测试（x86_64 走真实 Cloudflare 快速隧道）
+        run: MODE=${{ matrix.arch == 'x86_64' && 'cloudflare-quick' || 'local' }} scripts/remote-smoke.sh target/release/tmuxide
       - name: 打包
         run: |
           V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           D=tmuxide-$V-linux-${{ matrix.arch }}
           mkdir -p dist/$D/licenses
           cp target/release/tmuxide README.md LICENSE dist/$D/
-          cp vendor/tmux/out/licenses/* dist/$D/licenses/
+          cp vendor/tmux/out/licenses/* vendor/cloudflared/out/licenses/* dist/$D/licenses/
           tar -C dist -czf dist/$D.tar.gz $D
           (cd dist && sha256sum $D.tar.gz > $D.tar.gz.sha256)
       - uses: actions/upload-artifact@v4
@@ -125,6 +131,8 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: 下载并校验内置 cloudflared
+        run: OS=linux ARCH=x86_64 vendor/cloudflared/fetch.sh
       - name: 打包 deb 与 AppImage
         working-directory: apps/desktop
         env:
@@ -133,6 +141,8 @@ jobs:
           chmod +x ../../vendor/tmux/out/tmux-linux-x86_64
           export TMUXIDE_TMUX_BIN=$GITHUB_WORKSPACE/vendor/tmux/out/tmux-linux-x86_64
           export TMUXIDE_TMUX_VERSION=$(cat ../../vendor/tmux/out/VERSION)
+          export TMUXIDE_CLOUDFLARED_BIN=$GITHUB_WORKSPACE/vendor/cloudflared/out/cloudflared-linux-x86_64
+          export TMUXIDE_CLOUDFLARED_VERSION=$(cat ../../vendor/cloudflared/out/VERSION)
           pnpm install --frozen-lockfile
           pnpm tauri build --bundles deb,appimage
       - name: 收集安装包
@@ -173,6 +183,8 @@ jobs:
           key: ${{ matrix.target }}
       - name: 编译内置 tmux
         run: ARCH=${{ matrix.arch }} vendor/tmux/build.sh
+      - name: 下载并校验内置 cloudflared
+        run: OS=macos ARCH=${{ matrix.arch }} vendor/cloudflared/fetch.sh
       - name: 前端
         run: |
           pnpm --dir web install --frozen-lockfile
@@ -181,13 +193,17 @@ jobs:
         run: |
           export TMUXIDE_TMUX_BIN=$PWD/vendor/tmux/out/tmux-macos-${{ matrix.arch }}
           export TMUXIDE_TMUX_VERSION=$(cat vendor/tmux/out/VERSION)
+          export TMUXIDE_CLOUDFLARED_BIN=$PWD/vendor/cloudflared/out/cloudflared-macos-${{ matrix.arch }}
+          export TMUXIDE_CLOUDFLARED_VERSION=$(cat vendor/cloudflared/out/VERSION)
           cargo build --release --locked -p tmuxide-cli --target ${{ matrix.target }}
           BIN=target/${{ matrix.target }}/release/tmuxide
           otool -L $BIN
           if otool -L $BIN | tail -n +2 | grep -vE '^\s+/(usr/lib|System/Library)/'; then echo "链接了非系统库"; exit 1; fi
       - name: 冒烟测试
         if: matrix.arch == 'arm64'
-        run: scripts/smoke.sh target/${{ matrix.target }}/release/tmuxide
+        run: |
+          scripts/smoke.sh target/${{ matrix.target }}/release/tmuxide
+          scripts/remote-smoke.sh target/${{ matrix.target }}/release/tmuxide
       - name: 桌面版（.app / .dmg）
         working-directory: apps/desktop
         env:
@@ -195,6 +211,8 @@ jobs:
         run: |
           export TMUXIDE_TMUX_BIN=$GITHUB_WORKSPACE/vendor/tmux/out/tmux-macos-${{ matrix.arch }}
           export TMUXIDE_TMUX_VERSION=$(cat ../../vendor/tmux/out/VERSION)
+          export TMUXIDE_CLOUDFLARED_BIN=$GITHUB_WORKSPACE/vendor/cloudflared/out/cloudflared-macos-${{ matrix.arch }}
+          export TMUXIDE_CLOUDFLARED_VERSION=$(cat ../../vendor/cloudflared/out/VERSION)
           pnpm install --frozen-lockfile
           pnpm tauri build --target ${{ matrix.target }} --bundles app,dmg
       - name: 校验 .app 签名
@@ -208,7 +226,7 @@ jobs:
           D=tmuxide-$V-macos-${{ matrix.arch }}
           mkdir -p dist/$D/licenses
           cp target/${{ matrix.target }}/release/tmuxide README.md LICENSE dist/$D/
-          cp vendor/tmux/out/licenses/* dist/$D/licenses/
+          cp vendor/tmux/out/licenses/* vendor/cloudflared/out/licenses/* dist/$D/licenses/
           tar -C dist -czf dist/$D.tar.gz $D
           cp target/${{ matrix.target }}/release/bundle/dmg/*.dmg dist/
           (cd dist && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS-macos-${{ matrix.arch }}.txt)

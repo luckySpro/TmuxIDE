@@ -27,6 +27,9 @@ enum Cmd {
         /// 不自动打开浏览器
         #[arg(long)]
         no_open: bool,
+        /// 远程访问已开启时，在终端里显示手机配对二维码
+        #[arg(long)]
+        pair: bool,
     },
     /// 列出运行中的会话和已保存的快照
     Ls,
@@ -98,8 +101,8 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let paths = AppPaths::default_paths()?;
-    if let Cmd::Serve { port, no_open } = cli.cmd {
-        return serve(paths, port, no_open);
+    if let Cmd::Serve { port, no_open, pair } = cli.cmd {
+        return serve(paths, port, no_open, pair);
     }
     if let Cmd::InitRemote { path, branch } = &cli.cmd {
         tmuxide_git::init_bare(path, branch)?;
@@ -251,6 +254,10 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     i.tmux.path
                 );
                 println!("Git：     {}", i.git_engine);
+                match tmuxide_server::remote::tunnel::cloudflared_bundled_version() {
+                    Some(v) => println!("隧道：    cloudflared {v}（内置）"),
+                    None => println!("隧道：    未内置 cloudflared（远程访问会使用系统中安装的版本）"),
+                }
                 println!("数据目录：{}", i.data_dir);
                 println!("快照仓库：{}", i.repo_dir);
             }
@@ -263,7 +270,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn serve(paths: AppPaths, port: u16, no_open: bool) -> anyhow::Result<ExitCode> {
+fn serve(paths: AppPaths, port: u16, no_open: bool, pair: bool) -> anyhow::Result<ExitCode> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let h = tmuxide_server::start(ServeOptions { port, paths }).await?;
@@ -276,11 +283,48 @@ fn serve(paths: AppPaths, port: u16, no_open: bool) -> anyhow::Result<ExitCode> 
         if !no_open {
             open_browser(&url);
         }
+        if pair {
+            show_pairing(&h.remote, &h.service).await;
+        }
         tokio::signal::ctrl_c().await?;
+        h.remote.stop().await;
         println!("\n已停止。tmux 会话仍在后台运行。");
         anyhow::Ok(())
     })?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// 等远程访问连通后在终端打印配对二维码
+async fn show_pairing(remote: &tmuxide_server::Remote, svc: &Service) {
+    if !svc.config().remote.enabled {
+        println!("远程访问未开启：请在界面“设置 → 远程访问”中开启后再使用 --pair");
+        return;
+    }
+    println!("正在等待远程访问连通…");
+    for _ in 0..120 {
+        let s = remote.status();
+        if s.state == "online" && s.url.is_some() {
+            break;
+        }
+        if s.state == "error" && !s.message.is_empty() {
+            println!("远程访问：{}", s.message);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let p = remote.create_pairing();
+    match &p.url {
+        Some(url) => {
+            if let Some(qr) = tmuxide_server::remote::qr_text(url) {
+                println!("{qr}");
+            }
+            println!(
+                "用手机扫码，或打开 {} 后输入配对码",
+                url.split("/#").next().unwrap_or(url)
+            );
+        }
+        None => println!("远程地址还没有就绪，可稍后在手机上打开远程地址后输入配对码"),
+    }
+    println!("配对码：{}（{} 秒内有效，只能使用一次）", p.code, p.expires_in);
 }
 
 fn open_browser(url: &str) {

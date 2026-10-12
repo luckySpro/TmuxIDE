@@ -1,0 +1,240 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { api, wsUrl, type Me, type TermWindow } from './api'
+import { t } from './i18n'
+
+const props = defineProps<{ session: string; window: string; windows: TermWindow[]; readOnly: boolean }>()
+const emit = defineEmits<{ back: []; select: [window: string]; authLost: [] }>()
+
+const host = ref<HTMLDivElement>()
+const input = ref('')
+const ctrl = ref(false)
+const notice = ref('')
+const fitPhone = ref(load('tmx-fit') === '1')
+const fontSize = ref(Number(load('tmx-font')) || 0)
+
+let term: Terminal | undefined
+let fit: FitAddon | undefined
+let ws: WebSocket | undefined
+let observer: ResizeObserver | undefined
+let closed = false
+let retry: number | undefined
+let connId = 0
+
+function load(k: string) {
+  try { return localStorage.getItem(k) } catch { return null }
+}
+function store(k: string, v: string) {
+  try { localStorage.setItem(k, v) } catch { /* 隐私模式 */ }
+}
+
+const current = computed(() => props.windows.find((w) => w.id === props.window))
+const title = computed(() => current.value ? `${props.session} › ${current.value.name}` : props.session)
+
+function send(msg: object) {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
+}
+
+function sendInput(data: string) {
+  if (props.readOnly) return
+  if (ctrl.value && data.length === 1) {
+    const c = data.toUpperCase().charCodeAt(0)
+    if (c >= 64 && c <= 95) data = String.fromCharCode(c - 64)
+    ctrl.value = false
+  }
+  send({ type: 'input', data })
+}
+
+/** “保持电脑尺寸”时按屏幕宽度选择字号，太小时允许横向滚动 */
+function autoFont(cols: number) {
+  const width = host.value?.clientWidth ?? 360
+  return Math.max(7, Math.min(14, Math.floor((width - 8) / (cols * 0.602))))
+}
+
+function build() {
+  term?.dispose()
+  const cols = current.value?.cols ?? 80
+  const rows = current.value?.rows ?? 24
+  term = new Terminal({
+    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace",
+    fontSize: fontSize.value || (fitPhone.value ? 12 : autoFont(cols)),
+    lineHeight: 1.1,
+    cursorBlink: !props.readOnly,
+    disableStdin: props.readOnly,
+    scrollback: 0,
+    allowProposedApi: true,
+    ...(fitPhone.value ? {} : { cols, rows }),
+    theme: {
+      background: '#0b0e12', foreground: '#c9d1d9', cursor: '#4ade80', selectionBackground: '#264f78',
+      black: '#484f58', red: '#ff7b72', green: '#4ade80', yellow: '#f5b84a', blue: '#6cb6ff', magenta: '#d2a8ff', cyan: '#56d4dd', white: '#c9d1d9',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#86efac', brightYellow: '#f8d07a', brightBlue: '#a5d6ff', brightMagenta: '#e2c5ff', brightCyan: '#9be9f0', brightWhite: '#f0f6fc',
+    },
+  })
+  fit = undefined
+  if (fitPhone.value) {
+    fit = new FitAddon()
+    term.loadAddon(fit)
+  }
+  term.open(host.value!)
+  if (fit) {
+    try { fit.fit() } catch { /* 容器尚未布局 */ }
+  }
+  term.onData(sendInput)
+  term.onResize(({ cols: c, rows: r }) => { if (fitPhone.value) send({ type: 'resize', cols: c, rows: r }) })
+}
+
+function connect() {
+  if (!term) return
+  const id = ++connId
+  notice.value = ''
+  ws?.close()
+  ws = new WebSocket(wsUrl('/api/attach', {
+    session: props.session,
+    window: props.window,
+    fit: fitPhone.value ? 'true' : 'false',
+    cols: String(term.cols),
+    rows: String(term.rows),
+  }))
+  ws.binaryType = 'arraybuffer'
+  ws.onmessage = (e) => {
+    if (typeof e.data === 'string') term?.write(e.data)
+    else term?.write(new Uint8Array(e.data))
+  }
+  ws.onclose = async () => {
+    if (closed || id !== connId) return
+    notice.value = t('reconnecting')
+    // 先确认身份：PIN 超时、设备被移除或锁定时回到对应页面
+    try {
+      const me = await api.get<Me>('/api/me')
+      if (!me.unlocked) {
+        emit('authLost')
+        return
+      }
+    } catch { /* 网络问题，稍后重试 */ }
+    if (!props.windows.length) {
+      notice.value = t('ended')
+      return
+    }
+    window.clearTimeout(retry)
+    retry = window.setTimeout(connect, 1500)
+  }
+}
+
+function reopen() {
+  build()
+  connect()
+}
+
+function selectWindow(id: string) {
+  if (id === props.window) return
+  emit('select', id)
+}
+
+// 切换窗口：不同窗口尺寸不同，重新建立终端
+watch(() => props.window, () => nextTick(reopen))
+
+function toggleFit() {
+  fitPhone.value = !fitPhone.value
+  store('tmx-fit', fitPhone.value ? '1' : '0')
+  fontSize.value = 0
+  reopen()
+}
+
+function zoom(delta: number) {
+  const cur = term?.options.fontSize ?? 12
+  fontSize.value = Math.max(6, Math.min(20, cur + delta))
+  store('tmx-font', String(fontSize.value))
+  if (term) {
+    term.options.fontSize = fontSize.value
+    if (fit) { try { fit.fit() } catch { /* 忽略 */ } }
+  }
+}
+
+function submit() {
+  const text = input.value
+  input.value = ''
+  if (ctrl.value && text.length === 1) {
+    sendInput(text)
+    return
+  }
+  sendInput(text + '\r')
+}
+
+const keys: { label: string; data?: string; aria?: string }[] = [
+  { label: 'Esc', data: '\x1b' },
+  { label: 'Tab', data: '\t' },
+  { label: 'Ctrl' },
+  { label: '↑', data: '\x1b[A', aria: 'Up' },
+  { label: '↓', data: '\x1b[B', aria: 'Down' },
+  { label: '←', data: '\x1b[D', aria: 'Left' },
+  { label: '→', data: '\x1b[C', aria: 'Right' },
+  { label: '|', data: '|' },
+  { label: '~', data: '~' },
+  { label: '/', data: '/' },
+]
+
+function key(k: { label: string; data?: string }) {
+  if (!k.data) {
+    ctrl.value = !ctrl.value
+    return
+  }
+  sendInput(k.data)
+}
+
+onMounted(() => {
+  reopen()
+  observer = new ResizeObserver(() => {
+    if (fit) { try { fit.fit() } catch { /* 忽略 */ } }
+  })
+  observer.observe(host.value!)
+})
+
+onBeforeUnmount(() => {
+  closed = true
+  window.clearTimeout(retry)
+  observer?.disconnect()
+  ws?.close()
+  term?.dispose()
+})
+</script>
+
+<template>
+  <div class="term-page">
+    <header class="bar term-bar">
+      <button class="icon" :aria-label="t('back')" @click="emit('back')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
+      <div class="title">
+        <div class="host mono">{{ title }}</div>
+        <button class="sub link inline" @click="toggleFit">{{ fitPhone ? t('fitPhone') : t('keepSize') }} ⇄</button>
+      </div>
+      <button class="icon small" aria-label="A-" @click="zoom(-1)">A−</button>
+      <button class="icon small" aria-label="A+" @click="zoom(1)">A+</button>
+      <span class="badge" :class="{ ro: readOnly }">{{ readOnly ? t('readonly') : t('control') }}</span>
+    </header>
+    <nav v-if="windows.length > 1" class="tabs" aria-label="windows">
+      <button v-for="w in windows" :key="w.id" class="tab mono" :class="{ on: w.id === window }" @click="selectWindow(w.id)">{{ w.index }} {{ w.name }}</button>
+    </nav>
+    <div class="term-wrap" :class="{ scroll: !fitPhone }">
+      <div ref="host" class="term-host" />
+      <div v-if="notice" class="notice">{{ notice }}</div>
+    </div>
+    <div v-if="readOnly" class="ro-note">{{ t('readonlyNote') }}</div>
+    <div v-else class="controls">
+      <div class="keys">
+        <button v-for="k in keys" :key="k.label" class="key mono" :class="{ on: !k.data && ctrl }" :aria-label="k.aria" @click="key(k)">{{ k.label }}</button>
+      </div>
+      <form class="send" @submit.prevent="submit">
+        <label class="sr-only" for="cmd">{{ t('inputPlaceholder') }}</label>
+        <input id="cmd" v-model="input" class="input mono" :placeholder="t('inputPlaceholder')" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" />
+        <button class="primary">{{ t('send') }}</button>
+      </form>
+      <div class="keys wide">
+        <button class="key" @click="sendInput('\x03')">{{ t('interrupt') }}</button>
+        <button class="key mono" @click="sendInput('\x04')">^D</button>
+        <button class="key" @click="sendInput('\x0c')">{{ t('clear') }}</button>
+        <button class="key" @click="term?.focus()">{{ t('keyboard') }}</button>
+      </div>
+    </div>
+  </div>
+</template>

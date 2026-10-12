@@ -635,7 +635,9 @@ impl Service {
     }
 
     pub fn update_settings(&self, view: SettingsView) -> AppResult<SettingsView> {
-        let new = view.config;
+        let mut new = view.config;
+        // 远程访问只通过远程访问接口修改，避免设置页提交旧值覆盖
+        new.remote = self.config().remote;
         new.validate().map_err(AppError::BadRequest)?;
         if let Some(t) = view.token {
             self.secrets
@@ -665,6 +667,25 @@ impl Service {
             .map_err(|e| AppError::Other(e.to_string()))?;
         *self.config.write().unwrap() = new;
         Ok(self.settings())
+    }
+
+    /// 只更新远程访问配置
+    pub fn set_remote_config(&self, remote: crate::config::RemoteConfig) -> AppResult<()> {
+        remote.validate().map_err(AppError::BadRequest)?;
+        let mut cfg = self.config();
+        cfg.remote = remote;
+        cfg.save(&self.paths.config_file())
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        *self.config.write().unwrap() = cfg;
+        Ok(())
+    }
+
+    pub(crate) fn secrets(&self) -> &Secrets {
+        &self.secrets
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.paths.data_dir
     }
 
     // ---------- 自动保存 ----------

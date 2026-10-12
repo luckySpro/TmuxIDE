@@ -5,27 +5,31 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::{
+    config::RemoteConfig,
     error::{AppError, AppResult},
+    remote::Remote,
     service::{RestoreRequest, Service, SettingsView},
 };
 
 #[derive(Clone)]
 struct Ctx {
     svc: Arc<Service>,
+    remote: Arc<Remote>,
     token: Arc<String>,
     port: u16,
 }
 
-pub fn router(svc: Arc<Service>, token: String, port: u16) -> Router {
+pub fn router(svc: Arc<Service>, remote: Arc<Remote>, token: String, port: u16) -> Router {
     let ctx = Ctx {
         svc,
+        remote,
         token: Arc::new(token),
         port,
     };
@@ -54,6 +58,17 @@ pub fn router(svc: Arc<Service>, token: String, port: u16) -> Router {
         .route("/git/test", post(git_test))
         .route("/settings", get(settings).put(update_settings))
         .route("/attach", get(attach))
+        .route("/remote", get(remote_view))
+        .route("/remote/config", put(remote_config))
+        .route("/remote/pin", post(remote_pin))
+        .route("/remote/pair", post(remote_pair).delete(remote_pair_cancel))
+        .route(
+            "/remote/devices/{id}",
+            patch(remote_device).delete(remote_device_delete),
+        )
+        .route("/remote/connections/{id}", delete(remote_disconnect))
+        .route("/remote/restart", post(remote_restart))
+        .route("/remote/events", get(remote_events))
         .layer(middleware::from_fn_with_state(ctx.clone(), require_token));
     Router::new()
         .nest("/api", api)
@@ -320,4 +335,115 @@ async fn attach(
         q.rows.unwrap_or(40).clamp(5, 500),
     );
     ws.on_upgrade(move |socket| crate::pty::bridge(socket, tmux, q.session, size))
+}
+
+// ---------- 远程访问（电脑端管理） ----------
+
+async fn remote_view(State(ctx): State<Ctx>) -> J {
+    let r = ctx.remote.clone();
+    ok(tokio::task::spawn_blocking(move || r.view())
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))?)
+}
+
+#[derive(Deserialize)]
+struct RemoteConfigBody {
+    config: RemoteConfig,
+    /// Some("") 清除，Some(x) 设置，None 不变
+    token: Option<String>,
+}
+
+async fn remote_config(State(ctx): State<Ctx>, Json(b): Json<RemoteConfigBody>) -> J {
+    if let Some(t) = &b.token {
+        ctx.remote.set_token(t)?;
+    }
+    let before = ctx.svc.config().remote;
+    ctx.remote.set_config(b.config.clone())?;
+    // 网络相关设置变化或开关切换时重启；只改安全选项时立即生效，不断开
+    let mut net_before = before.clone();
+    let mut net_after = b.config.clone();
+    for c in [&mut net_before, &mut net_after] {
+        c.require_pin = false;
+        c.idle_minutes = 0;
+        c.device_days = 0;
+        c.notify = false;
+    }
+    if net_before != net_after || b.token.is_some() {
+        if let Err(e) = ctx.remote.restart().await {
+            tracing::warn!("远程访问启动失败：{e}");
+        }
+    }
+    remote_view(State(ctx)).await
+}
+
+#[derive(Deserialize)]
+struct PinBody {
+    pin: String,
+}
+
+async fn remote_pin(State(ctx): State<Ctx>, Json(b): Json<PinBody>) -> J {
+    let r = ctx.remote.clone();
+    tokio::task::spawn_blocking(move || r.set_pin(&b.pin))
+        .await
+        .map_err(|e| AppError::Other(e.to_string()))??;
+    ok(json!({ "ok": true }))
+}
+
+async fn remote_pair(State(ctx): State<Ctx>) -> J {
+    ok(ctx.remote.create_pairing())
+}
+
+async fn remote_pair_cancel(State(ctx): State<Ctx>) -> J {
+    ctx.remote.cancel_pairing();
+    ok(json!({ "ok": true }))
+}
+
+#[derive(Deserialize)]
+struct DeviceBody {
+    name: Option<String>,
+    read_only: Option<bool>,
+    #[serde(default)]
+    unlock: bool,
+}
+
+async fn remote_device(State(ctx): State<Ctx>, Path(id): Path<String>, Json(b): Json<DeviceBody>) -> J {
+    ctx.remote
+        .update_device(&id, b.name.as_deref(), b.read_only, b.unlock)?;
+    ok(json!({ "ok": true }))
+}
+
+async fn remote_device_delete(State(ctx): State<Ctx>, Path(id): Path<String>) -> J {
+    ctx.remote.remove_device(&id)?;
+    ok(json!({ "ok": true }))
+}
+
+async fn remote_disconnect(State(ctx): State<Ctx>, Path(id): Path<u64>) -> J {
+    ctx.remote.disconnect(id)?;
+    ok(json!({ "ok": true }))
+}
+
+async fn remote_restart(State(ctx): State<Ctx>) -> J {
+    ctx.remote.restart().await?;
+    remote_view(State(ctx)).await
+}
+
+#[derive(Deserialize)]
+struct SinceQuery {
+    #[serde(default)]
+    since: u64,
+}
+
+/// 电脑界面轮询：远程访问状态摘要和新的访问记录（用于弹出提醒）
+async fn remote_events(State(ctx): State<Ctx>, Query(q): Query<SinceQuery>) -> J {
+    let r = &ctx.remote;
+    let status = r.status();
+    let online = r.connections().iter().filter(|c| c.kind == "terminal").count();
+    ok(json!({
+        "state": status.state,
+        "url": status.url,
+        "notify": ctx.svc.config().remote.notify,
+        "terminals": online,
+        "seq": r.store.audit_seq(),
+        "events": if q.since == 0 { Vec::new() } else { r.store.audit(q.since, 20) },
+    }))
 }

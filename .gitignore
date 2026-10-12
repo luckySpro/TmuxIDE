@@ -6,3 +6,5 @@ vendor/tmux/build/
 vendor/tmux/out/
 *.log
 .DS_Store
+vendor/cloudflared/build/
+vendor/cloudflared/out/

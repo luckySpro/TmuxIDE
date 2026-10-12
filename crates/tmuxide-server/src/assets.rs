@@ -24,8 +24,12 @@ pub async fn static_handler(uri: Uri) -> Response {
         },
         None => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };
+    respond(name, file.data.into_owned(), CSP)
+}
+
+fn respond(name: &str, data: Vec<u8>, csp: &str) -> Response {
     let mime = mime_guess::from_path(name).first_or_octet_stream();
-    let cache = if name == "index.html" {
+    let cache = if name.ends_with(".html") || name.ends_with(".webmanifest") {
         "no-cache"
     } else {
         "public, max-age=31536000, immutable"
@@ -34,12 +38,27 @@ pub async fn static_handler(uri: Uri) -> Response {
         [
             (header::CONTENT_TYPE, mime.as_ref().to_string()),
             (header::CACHE_CONTROL, cache.to_string()),
-            (header::CONTENT_SECURITY_POLICY, CSP.to_string()),
+            (header::CONTENT_SECURITY_POLICY, csp.to_string()),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
         ],
-        file.data.into_owned(),
+        data,
     )
         .into_response()
+}
+
+/// 远程端口上的静态资源：只提供手机页面（m.html）及其脚本样式，不提供电脑界面
+pub fn mobile_asset(path: &str, csp: &str) -> Response {
+    let path = path.trim_start_matches('/');
+    let name = match path {
+        "" | "index.html" | "m.html" => "m.html",
+        p if p.starts_with("assets/") || p == "manifest.webmanifest" || p.starts_with("icon-") => p,
+        _ => return (StatusCode::NOT_FOUND, "not found").into_response(),
+    };
+    match Assets::get(name) {
+        Some(f) => respond(name, f.data.into_owned(), csp),
+        None if name == "m.html" => missing(),
+        None => (StatusCode::NOT_FOUND, "not found").into_response(),
+    }
 }
 
 fn missing() -> Response {

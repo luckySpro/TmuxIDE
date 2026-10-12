@@ -76,3 +76,34 @@ fn rejects_bad_names_and_duplicates() {
     assert!(t.has_session("renamed"));
     let _ = t.run(&["kill-server"]);
 }
+
+#[test]
+fn grouped_sessions_are_hidden_and_captured() {
+    let Some((t, _dir)) = tmux("grouped") else { return };
+    t.new_session("main", None).unwrap();
+    t.new_window("main", Some("two")).unwrap();
+    let s = t.session("main").unwrap();
+    let pane = s.windows[0].panes[0].id.clone();
+    t.run(&["send-keys", "-t", &pane, "-l", "echo hello-remote"]).unwrap();
+    t.run(&["send-keys", "-t", &pane, "Enter"]).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    t.new_grouped("main", "_tmuxide_mtest")
+        .map_err(|e| e.to_string())
+        .unwrap();
+    assert!(t.has_session("_tmuxide_mtest"));
+    // 内部会话不出现在列表中，也不能被用户创建
+    assert_eq!(t.sessions().unwrap().len(), 1);
+    assert!(t.new_session("_tmuxide_x", None).is_err());
+
+    let other = s.windows[1].panes[0].id.clone();
+    let caps = t.capture_many(&[pane, other], 3).unwrap();
+    assert_eq!(caps.len(), 2);
+    assert!(caps[0].contains("hello-remote"), "{caps:?}");
+
+    // 没有客户端的分组会话会被清理
+    t.cleanup_hidden();
+    assert!(!t.has_session("_tmuxide_mtest"));
+    assert!(t.has_session("main"));
+    let _ = t.run(&["kill-server"]);
+}

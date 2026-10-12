@@ -1,0 +1,13 @@
+{
+  "name": "TmuxIDE 远程终端",
+  "short_name": "TmuxIDE",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d1014",
+  "theme_color": "#14181e",
+  "icons": [
+    { "src": "icon-256.png", "sizes": "256x256", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

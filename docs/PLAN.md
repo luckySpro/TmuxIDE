@@ -241,3 +241,10 @@ TmuxIDE/
 5. 电脑设置页“远程访问”：网络方式、状态、二维码配对、设备管理、访问记录、连接提醒。
 6. CLI：`tmuxide serve --pair` 在终端打印配对二维码，方便无界面服务器。
 7. 测试与发布：认证单元测试、端到端（配对 → 解锁 → 列表 → 输入 → 只读 → 撤销）、CI 内置 cloudflared、v0.2.0。
+
+### 8.x 实施状态（2026-10-12，v0.2.0）
+
+- 已实现上述全部模式与认证流程；cloudflared 固定为 2026.10.0，由 `vendor/cloudflared/fetch.sh` 下载并按 `versions.env` 中的 SHA-256 校验后嵌入。
+- 本地验证：Playwright 端到端（电脑开启 → 设 PIN → 配对 → 手机输错/输对 PIN → 列表 → 打开终端发命令 → 切换窗口与适配尺寸 → 设为只读 → 移除），以及 `scripts/remote-smoke.sh` 的本机端口模式。
+- CI：Linux x86_64 与 macOS arm64 用 `scripts/remote-smoke.sh` 经真实 Cloudflare 快速隧道跑通配对、认证与终端连接；Linux arm64 跑本机端口模式。
+- 未验证：Tailscale 两种模式（需要已登录 tailnet 的机器）、Cloudflare 自有域名模式（需要 Tunnel Token）、真机 iOS/Android 浏览器。

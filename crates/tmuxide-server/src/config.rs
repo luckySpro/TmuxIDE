@@ -39,6 +39,7 @@ pub struct Config {
     pub save: SaveConfig,
     pub tmux: TmuxConfig,
     pub ui: UiConfig,
+    pub remote: RemoteConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -132,6 +133,106 @@ impl Default for UiConfig {
     }
 }
 
+/// 远程访问（手机/平板）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct RemoteConfig {
+    pub enabled: bool,
+    /// cloudflare-quick | cloudflare-token | tailscale-serve | tailscale-direct | local
+    /// （local：只监听本机端口，由用户自己的反向代理转发，例如 frp、ngrok、nginx）
+    pub mode: String,
+    /// 远程端口：隧道转发到 127.0.0.1 的这个端口（Tailscale 直连时监听 tailnet 地址）
+    pub port: u16,
+    /// Cloudflare 自有域名模式下的公开域名
+    pub public_host: String,
+    /// Tailscale serve 对外的 HTTPS 端口
+    pub tailscale_https_port: u16,
+    /// 已配对设备每次打开还要输入 PIN
+    pub require_pin: bool,
+    /// 空闲多少分钟后需要重新输入 PIN
+    pub idle_minutes: u32,
+    /// 设备多少天未使用后凭证失效
+    pub device_days: u32,
+    /// 远程连接时在电脑界面提醒
+    pub notify: bool,
+    /// Cloudflare 快速隧道额外的邮箱验证（Cloudflare Access 一次性验证码），空表示不启用
+    pub allowed_emails: Vec<String>,
+    /// 远程访问开启期间阻止电脑空闲睡眠（macOS）
+    pub keep_awake: bool,
+}
+
+impl Default for RemoteConfig {
+    fn default() -> Self {
+        RemoteConfig {
+            enabled: false,
+            mode: "cloudflare-quick".into(),
+            port: 7681,
+            public_host: String::new(),
+            tailscale_https_port: 443,
+            require_pin: true,
+            idle_minutes: 30,
+            device_days: 30,
+            notify: true,
+            allowed_emails: Vec::new(),
+            keep_awake: true,
+        }
+    }
+}
+
+pub const REMOTE_MODES: &[&str] = &[
+    "cloudflare-quick",
+    "cloudflare-token",
+    "tailscale-serve",
+    "tailscale-direct",
+    "local",
+];
+
+impl RemoteConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !REMOTE_MODES.contains(&self.mode.as_str()) {
+            return Err(format!("未知的远程访问方式：{}", self.mode));
+        }
+        if self.port < 1024 {
+            return Err("远程端口必须在 1024 到 65535 之间".into());
+        }
+        if self.tailscale_https_port == 0 {
+            return Err("Tailscale HTTPS 端口不能为 0".into());
+        }
+        let h = self.public_host.trim();
+        if !h.is_empty()
+            && (h.len() > 253
+                || !h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+                || h.starts_with('.'))
+        {
+            return Err("公开域名只能包含字母、数字、- 和 .，不要带 https://".into());
+        }
+        if self.mode == "cloudflare-token" && h.is_empty() {
+            return Err("Cloudflare 自有域名模式需要填写公开域名".into());
+        }
+        if !(1..=24 * 60).contains(&self.idle_minutes) {
+            return Err("空闲锁定时间需在 1 分钟到 24 小时之间".into());
+        }
+        for e in &self.allowed_emails {
+            let e = e.trim();
+            let ok = match e.split_once('@') {
+                Some((user, domain)) => {
+                    (user == "*" || (!user.is_empty() && !user.contains(|c: char| c.is_whitespace() || c == ',')))
+                        && domain.contains('.')
+                        && !domain.contains(|c: char| c.is_whitespace() || c == ',' || c == '@')
+                }
+                None => false,
+            };
+            if !ok {
+                return Err(format!("邮箱格式不正确：{e}（可以写 *@example.com 允许整个域名）"));
+            }
+        }
+        if !(1..=365).contains(&self.device_days) {
+            return Err("设备有效期需在 1 到 365 天之间".into());
+        }
+        Ok(())
+    }
+}
+
 impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Config> {
         match std::fs::read_to_string(path) {
@@ -166,7 +267,7 @@ impl Config {
         if self.save.scrollback_lines > 100_000 {
             return Err("滚动缓冲区行数不能超过 100000".into());
         }
-        Ok(())
+        self.remote.validate()
     }
 }
 
@@ -198,5 +299,13 @@ mod tests {
         let mut bad = c.clone();
         bad.git.auth = "x".into();
         assert!(bad.validate().is_err());
+        assert!(!c.remote.enabled);
+        let mut r = c.clone();
+        r.remote.mode = "cloudflare-token".into();
+        assert!(r.validate().is_err(), "自有域名模式必须填域名");
+        r.remote.public_host = "https://x.com".into();
+        assert!(r.validate().is_err());
+        r.remote.public_host = "tmux.example.com".into();
+        assert!(r.validate().is_ok());
     }
 }

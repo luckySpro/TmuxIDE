@@ -43,6 +43,7 @@ export const api = {
   get: <T>(p: string) => request<T>('GET', p),
   post: <T>(p: string, b: unknown = {}) => request<T>('POST', p, b),
   put: <T>(p: string, b: unknown) => request<T>('PUT', p, b),
+  patch: <T>(p: string, b: unknown) => request<T>('PATCH', p, b),
   del: <T>(p: string) => request<T>('DELETE', p),
 }
 
@@ -79,5 +80,22 @@ export interface Config {
   save: { autosave_minutes: number; scrollback: boolean; scrollback_lines: number; exclude: string[] }
   tmux: { use_system: boolean; socket: string }
   ui: { language: string }
+  remote: RemoteConfig
 }
+export interface RemoteConfig {
+  enabled: boolean; mode: string; port: number; public_host: string; tailscale_https_port: number
+  require_pin: boolean; idle_minutes: number; device_days: number; notify: boolean; allowed_emails: string[]; keep_awake: boolean
+}
+export interface ToolInfo { found: boolean; bundled: boolean; path: string; version: string }
+export interface RemoteDevice { id: string; name: string; created_at: string; last_seen: string; last_ip: string; read_only: boolean; locked: boolean; online: boolean }
+export interface RemoteConn { id: number; device_id: string; device_name: string; ip: string; kind: 'list' | 'terminal'; target: string; started: string; enters: number }
+export interface AuditEvent { seq: number; ts: string; kind: string; device: string | null; ip: string; detail: string }
+export interface PairingView { code: string; expires_in: number; url: string | null; qr_svg: string | null }
+export interface RemoteView {
+  config: RemoteConfig; has_token: boolean; has_pin: boolean
+  status: { state: 'off' | 'starting' | 'online' | 'error'; url: string | null; message: string }
+  devices: RemoteDevice[]; connections: RemoteConn[]; audit: AuditEvent[]; audit_seq: number
+  pairing: PairingView | null; cloudflared: ToolInfo; tailscale: ToolInfo
+}
+export interface RemoteSummary { state: string; url: string | null; notify: boolean; terminals: number; seq: number; events: AuditEvent[] }
 export interface SettingsView { config: Config; has_token: boolean; has_passphrase: boolean; token?: string | null; passphrase?: string | null }

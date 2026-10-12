@@ -190,13 +190,93 @@ impl Tmux {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
-    /// 列出所有会话及其窗口和面板；server 未运行时返回空列表
+    /// 列出所有会话及其窗口和面板；server 未运行时返回空列表。
+    /// 远程访问使用的内部分组会话（`_tmuxide_` 开头）不在其中。
     pub fn sessions(&self) -> Result<Vec<SessionInfo>> {
         match self.run(&["list-panes", "-a", "-F", parse::PANE_FORMAT]) {
-            Ok(text) => Ok(parse::parse_panes(&text)),
+            Ok(text) => Ok(parse::parse_panes(&text)
+                .into_iter()
+                .filter(|s| !is_hidden(&s.name))
+                .collect()),
             Err(TmuxError::Command(msg)) if is_no_server(&msg) => Ok(Vec::new()),
             Err(e) => Err(e),
         }
+    }
+
+    /// 为远程客户端创建一个与 `target` 共享窗口的分组会话：
+    /// 远程端切换窗口不会影响电脑上的当前窗口。调用方在客户端断开后负责关闭它；
+    /// 异常退出遗留的由 [`Tmux::cleanup_hidden`] 清理。
+    pub fn new_grouped(&self, target: &str, name: &str) -> Result<()> {
+        if !is_hidden(name) || !valid_session_name(name) {
+            return Err(TmuxError::BadName(name.to_string()));
+        }
+        self.run(&["new-session", "-d", "-t", &format!("={target}"), "-s", name])?;
+        // 状态栏显示原会话名，而不是内部名称
+        let _ = self.run(&[
+            "set-option",
+            "-t",
+            &format!("={name}:"),
+            "status-left",
+            &format!("[{}] ", target.replace('#', "##")),
+        ]);
+        Ok(())
+    }
+
+    /// 清理没有客户端的内部分组会话（例如上次异常退出留下的）
+    pub fn cleanup_hidden(&self) {
+        let Ok(text) = self.run(&["list-sessions", "-F", "#{session_name} #{session_attached}"]) else {
+            return;
+        };
+        for line in text.lines() {
+            if let Some((name, attached)) = line.rsplit_once(' ') {
+                if is_hidden(name) && attached == "0" {
+                    let _ = self.kill_session(name);
+                }
+            }
+        }
+    }
+
+    /// 远程 attach：`read_only` 时客户端不能输入，`ignore_size` 时不改变窗口尺寸
+    pub fn attach_argv_with(&self, session: &str, read_only: bool, ignore_size: bool) -> (PathBuf, Vec<String>) {
+        let (bin, mut args) = self.attach_argv(session);
+        let mut flags = Vec::new();
+        if read_only {
+            flags.push("read-only");
+        }
+        if ignore_size {
+            flags.push("ignore-size");
+        }
+        if !flags.is_empty() {
+            args.push("-f".into());
+            args.push(flags.join(","));
+        }
+        (bin, args)
+    }
+
+    /// 一次 tmux 调用抓取多个面板当前屏幕的最后 `lines` 行（纯文本，去掉末尾空行）
+    pub fn capture_many(&self, pane_ids: &[String], lines: usize) -> Result<Vec<String>> {
+        if pane_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        const MARK: &str = "@@tmuxide-pane-7f3a@@";
+        let mut args: Vec<&str> = Vec::new();
+        for (i, id) in pane_ids.iter().enumerate() {
+            if i > 0 {
+                args.push(";");
+            }
+            args.extend(["display-message", "-p", MARK, ";", "capture-pane", "-p", "-t", id]);
+        }
+        let out = self.run(&args)?;
+        let parts: Vec<String> = out
+            .split(&format!("{MARK}\n"))
+            .skip(1)
+            .map(|chunk| {
+                let all: Vec<&str> = chunk.lines().collect();
+                let end = all.iter().rposition(|l| !l.trim().is_empty()).map_or(0, |i| i + 1);
+                all[end.saturating_sub(lines)..end].join("\n")
+            })
+            .collect();
+        Ok(parts)
     }
 
     pub fn session(&self, name: &str) -> Result<SessionInfo> {
@@ -337,6 +417,13 @@ fn write_if_changed(path: &Path, content: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// 远程访问内部会话名前缀
+pub const HIDDEN_PREFIX: &str = "_tmuxide_";
+
+pub fn is_hidden(name: &str) -> bool {
+    name.starts_with(HIDDEN_PREFIX)
+}
+
 fn is_no_server(msg: &str) -> bool {
     msg.contains("no server running")
         || msg.contains("error connecting to")
@@ -344,7 +431,7 @@ fn is_no_server(msg: &str) -> bool {
 }
 
 fn check_name(name: &str) -> Result<()> {
-    if valid_session_name(name) {
+    if valid_session_name(name) && !is_hidden(name) {
         Ok(())
     } else {
         Err(TmuxError::BadName(name.to_string()))
