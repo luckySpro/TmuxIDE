@@ -8,7 +8,7 @@ WORK=$(mktemp -d)
 trap 'TMUXIDE_HOME=$WORK/a "$BIN" tmux kill-server >/dev/null 2>&1 || true; TMUXIDE_HOME=$WORK/b "$BIN" tmux kill-server >/dev/null 2>&1 || true' EXIT
 
 for tool in tmux git; do
-  if command -v "$tool" >/dev/null 2>&1; then echo "注意：环境中存在系统 $tool（$(command -v $tool)），本测试不会使用它"; fi
+  if command -v "$tool" >/dev/null 2>&1; then echo "注意：环境中存在系统 ${tool}（$(command -v $tool)），本测试不会使用它"; fi
 done
 
 mkdir -p "$WORK/a" "$WORK/b"

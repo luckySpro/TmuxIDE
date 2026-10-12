@@ -26,7 +26,7 @@ curl -fsSL --retry 4 -o "$TMP/$ASSET" \
 if command -v sha256sum >/dev/null; then GOT=$(sha256sum "$TMP/$ASSET" | cut -d' ' -f1)
 else GOT=$(shasum -a 256 "$TMP/$ASSET" | cut -d' ' -f1); fi
 if [ "$GOT" != "$WANT" ]; then
-  echo "cloudflared 校验失败：期望 $WANT，实际 $GOT" >&2
+  echo "cloudflared 校验失败：期望 ${WANT}，实际 ${GOT}" >&2
   exit 1
 fi
 
