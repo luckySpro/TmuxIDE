@@ -315,10 +315,10 @@ impl Remote {
                     let _ = stop_tx.send(true);
                     AppError::BadRequest(e)
                 };
-                let name = tunnel::tailscale_dns_name(&bin).await.map_err(&fail)?;
+                let name = tunnel::tailscale_dns_name(&bin).await.map_err(fail)?;
                 tunnel::tailscale_serve_on(&bin, cfg.tailscale_https_port, cfg.port)
                     .await
-                    .map_err(&fail)?;
+                    .map_err(fail)?;
                 let url = if cfg.tailscale_https_port == 443 {
                     format!("https://{name}")
                 } else {
