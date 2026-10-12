@@ -38,6 +38,43 @@ function send(msg: object) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
 
+// 输出历史（tmux 滚动缓冲区）
+const hist = ref<{ text: string; lines: number; loading: boolean; error: string; copied: boolean } | null>(null)
+const histBody = ref<HTMLPreElement>()
+
+async function openHistory(lines = 5000) {
+  const w = props.windows.find((x) => x.id === props.window)
+  const p = w?.panes.find((x) => x.active) ?? w?.panes[0]
+  if (!p) return
+  hist.value = { text: hist.value?.text ?? '', lines, loading: true, error: '', copied: false }
+  try {
+    const r = await api.get<{ text: string }>(`/api/history?pane=${encodeURIComponent(p.id)}&lines=${lines}`)
+    if (!hist.value) return
+    hist.value.text = r.text
+    await nextTick()
+    if (histBody.value) histBody.value.scrollTop = histBody.value.scrollHeight
+  } catch (e) {
+    if (hist.value) hist.value.error = e instanceof Error ? e.message : String(e)
+  } finally {
+    if (hist.value) hist.value.loading = false
+  }
+}
+
+async function copyHistory() {
+  if (!hist.value?.text) return
+  try {
+    await navigator.clipboard.writeText(hist.value.text)
+  } catch {
+    const el = document.createElement('textarea')
+    el.value = hist.value.text
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand('copy')
+    el.remove()
+  }
+  hist.value.copied = true
+}
+
 function sendInput(data: string) {
   if (props.readOnly) return
   if (ctrl.value && data.length === 1) {
@@ -235,6 +272,7 @@ onBeforeUnmount(() => {
         <div class="host mono">{{ title }}</div>
         <button class="sub link inline" @click="toggleFit">{{ fitPhone ? t('fitPhone') : t('keepSize') }} ⇄</button>
       </div>
+      <button class="icon small hist-open" @click="openHistory()">{{ t('history') }}</button>
       <button class="icon small" aria-label="A-" @click="zoom(-1)">A−</button>
       <button class="icon small" aria-label="A+" @click="zoom(1)">A+</button>
       <span class="badge" :class="{ ro: readOnly }">{{ readOnly ? t('readonly') : t('control') }}</span>
@@ -250,6 +288,19 @@ onBeforeUnmount(() => {
     <div ref="wrap" class="term-wrap" :class="{ scroll: !fitPhone }" @wheel.passive="markScroll" @touchmove.passive="markScroll">
       <div ref="host" class="term-host" />
       <div v-if="notice" class="notice">{{ notice }}</div>
+    </div>
+    <div v-if="hist" class="hist" role="dialog" :aria-label="t('historyTitle')">
+      <header class="bar term-bar">
+        <div class="title"><div class="host">{{ t('historyTitle') }}</div><div class="sub mono">{{ title }}</div></div>
+        <button class="icon small" @click="copyHistory">{{ hist.copied ? t('copied') : t('copyAll') }}</button>
+        <button class="icon small" @click="hist = null">{{ t('close') }}</button>
+      </header>
+      <p v-if="hist.error" class="error">{{ hist.error }}</p>
+      <pre ref="histBody" class="hist-body mono">{{ hist.text || (hist.loading ? '…' : t('historyEmpty')) }}</pre>
+      <footer class="hist-foot">
+        <span>{{ t('historyHint') }}</span>
+        <button v-if="hist.lines < 50000" class="link inline" :disabled="hist.loading" @click="openHistory(50000)">{{ t('historyMore') }}</button>
+      </footer>
     </div>
     <div v-if="readOnly" class="ro-note">{{ t('readonlyNote') }}</div>
     <div v-else class="controls">

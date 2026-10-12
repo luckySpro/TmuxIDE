@@ -17,6 +17,8 @@ const zh = {
   tunnelAuth: '需要重新通过 Cloudflare 邮箱验证，正在跳转…',
   tunnelAuthFailed: 'Cloudflare 邮箱验证没有生效（浏览器可能拦截了 Cookie）。请换用系统默认浏览器打开，或在电脑上清空“允许的邮箱”。',
   ungrouped: '未分组',
+  history: '历史', historyTitle: '输出历史', historyMore: '加载更多（最近 5 万行）', historyEmpty: '（没有输出）',
+  historyHint: '当前面板之前的输出，可以选中复制。vim、less 这类全屏程序的画面不在其中。', copyAll: '复制全部', copied: '已复制', close: '关闭',
 }
 type Key = keyof typeof zh
 const en: Record<Key, string> = {
@@ -38,6 +40,8 @@ const en: Record<Key, string> = {
   tunnelAuth: 'Cloudflare email verification is needed again, redirecting…',
   tunnelAuthFailed: 'Cloudflare email verification did not stick (the browser may be blocking cookies). Open the link in your default browser, or clear “Allowed emails” on the computer.',
   ungrouped: 'Ungrouped',
+  history: 'History', historyTitle: 'Output history', historyMore: 'Load more (last 50,000 lines)', historyEmpty: '(no output)',
+  historyHint: 'Earlier output of this pane; select text to copy. Full-screen programs such as vim or less are not included.', copyAll: 'Copy all', copied: 'Copied', close: 'Close',
 }
 
 const dict: Record<Key, string> = navigator.language.toLowerCase().startsWith('zh') ? zh : en

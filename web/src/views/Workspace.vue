@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import NewSessionDialog from '../components/NewSessionDialog.vue'
+import OutputHistory from '../components/OutputHistory.vue'
 import SessionTree from '../components/SessionTree.vue'
 import TerminalPane from '../components/TerminalPane.vue'
 import Inspector from '../components/Inspector.vue'
@@ -12,6 +13,13 @@ import { act, currentSession, groupNames, refreshSessions, setGroupFilter, state
 const session = computed(currentSession)
 const groups = computed(groupNames)
 const showNew = ref(false)
+const historyOf = ref<{ pane: string; title: string } | null>(null)
+
+function openHistory() {
+  const w = session.value?.windows.find((x) => x.active) ?? session.value?.windows[0]
+  const p = w?.panes.find((x) => x.active) ?? w?.panes[0]
+  if (session.value && w && p) historyOf.value = { pane: p.id, title: `${session.value.name} › ${w.index}:${w.name}` }
+}
 /** 选项卡里的会话：按分组筛选，分组相同的排在一起 */
 const tabSessions = computed(() => {
   const f = state.groupFilter && groups.value.includes(state.groupFilter) ? state.groupFilter : ''
@@ -70,6 +78,8 @@ function newWindow() {
           <button v-for="w in session.windows" :key="w.id" role="tab" :aria-selected="w.active" class="tab mono" :class="{ active: w.active }"
             @click="selectWindow(w.id)">{{ w.index }}:{{ w.name }}</button>
           <button class="tab add" :aria-label="t('newWindow')" :title="t('newWindow')" @click="newWindow"><Icon name="plus" :size="14" /></button>
+          <span class="grow" />
+          <button class="hist-btn" :title="t('outputHistoryHint')" @click="openHistory"><Icon name="history" :size="14" />{{ t('outputHistory') }}</button>
         </div>
         <!-- 切换会话选项卡时保留终端连接，切回来立即可用 -->
         <KeepAlive :max="8">
@@ -84,12 +94,16 @@ function newWindow() {
     </main>
     <Inspector v-if="session" :session="session" />
     <NewSessionDialog v-if="showNew" @close="showNew = false" />
+    <OutputHistory v-if="historyOf" :pane="historyOf.pane" :title="historyOf.title" @close="historyOf = null" />
   </div>
 </template>
 
 <style scoped>
 .workspace { flex: 1; display: flex; min-height: 0; }
 .center { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.grow { flex: 1; }
+.hist-btn { align-self: center; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.hist-btn:hover { color: var(--text); }
 .stabs { flex-shrink: 0; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .groups { display: flex; gap: 4px; flex-shrink: 0; padding-right: 10px; border-right: 1px solid var(--border); }
 .chip { height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--border); background: none; color: var(--text-2); font-size: 12px; cursor: pointer; white-space: nowrap; }

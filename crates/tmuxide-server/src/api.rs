@@ -70,6 +70,7 @@ fn routes(remote_admin: bool) -> Router<Ctx> {
         .route("/sessions/{name}/group", put(set_group))
         .route("/sessions/{name}/windows", post(new_window))
         .route("/windows/{id}/select", post(select_window))
+        .route("/panes/{id}/history", get(pane_history))
         .route("/windows/{id}/rename", post(rename_window))
         .route("/windows/{id}", delete(kill_window))
         .route("/saved", get(saved))
@@ -202,6 +203,22 @@ struct Rename {
 
 async fn rename_session(State(ctx): State<Ctx>, Path(name): Path<String>, Json(b): Json<Rename>) -> J {
     ok(run(&ctx, move |s| Ok(s.tmux().rename_session(&name, &b.to)?)).await?)
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HistoryQuery {
+    pub lines: Option<u32>,
+}
+
+/// 面板的输出历史：最多 50000 行，默认 5000 行
+pub(crate) fn history_lines(q: &HistoryQuery) -> u32 {
+    q.lines.unwrap_or(5000).clamp(100, 50_000)
+}
+
+async fn pane_history(State(ctx): State<Ctx>, Path(id): Path<String>, Query(q): Query<HistoryQuery>) -> J {
+    let lines = history_lines(&q);
+    let text = run(&ctx, move |s| Ok(s.tmux().history(&id, lines)?)).await?;
+    ok(json!({ "text": text }))
 }
 
 #[derive(Deserialize)]

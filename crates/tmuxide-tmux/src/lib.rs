@@ -356,6 +356,15 @@ impl Tmux {
         self.run(&["rename-window", "-t", window_id, name]).map(|_| ())
     }
 
+    /// 面板的输出历史（含当前屏幕），最多 `lines` 行，去掉末尾空行
+    pub fn history(&self, pane_id: &str, lines: u32) -> Result<String> {
+        if !valid_pane_id(pane_id) {
+            return Err(TmuxError::Command(format!("面板 id 不合法：{pane_id}")));
+        }
+        let text = self.capture(pane_id, lines)?;
+        Ok(text.trim_end().to_string())
+    }
+
     /// 抓取面板滚动缓冲区（纯文本）
     pub fn capture(&self, pane_id: &str, lines: u32) -> Result<String> {
         let start = format!("-{lines}");
@@ -424,7 +433,7 @@ pub use restore::RestoreReport;
 const DEFAULT_CONF: &str = r#"# 由 TmuxIDE 生成：基础设置，随后加载用户自己的配置
 set -g default-terminal "screen-256color"
 set -g mouse on
-set -g history-limit 10000
+set -g history-limit 50000
 set -g base-index 1
 setw -g pane-base-index 0
 source-file -q ~/.tmux.conf
@@ -449,6 +458,11 @@ fn is_no_server(msg: &str) -> bool {
     msg.contains("no server running")
         || msg.contains("error connecting to")
         || msg.contains("No such file or directory")
+}
+
+/// tmux 面板 id，如 `%12`
+pub fn valid_pane_id(id: &str) -> bool {
+    id.len() > 1 && id.starts_with('%') && id[1..].chars().all(|c| c.is_ascii_digit())
 }
 
 fn check_name(name: &str) -> Result<()> {

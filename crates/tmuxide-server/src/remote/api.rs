@@ -38,6 +38,7 @@ pub fn router(remote: R) -> Router {
         .route("/api/forget", post(forget))
         .route("/api/events", get(events))
         .route("/api/attach", get(attach))
+        .route("/api/history", get(history))
         .nest_service(
             "/api/admin",
             crate::api::admin_router(remote.svc.clone(), remote.clone(), remote.updater())
@@ -419,6 +420,35 @@ async fn admin_guard(
 fn ws_auth(remote: &Remote, c: &Client, headers: &HeaderMap) -> Result<Device, Response> {
     check_origin(c, headers)?;
     authenticate(remote, c, headers, true).map_err(|f| f.response())
+}
+
+#[derive(Deserialize)]
+struct RemoteHistoryQuery {
+    pane: String,
+    lines: Option<u32>,
+}
+
+/// 面板的输出历史（只读，已解锁的设备都可以看）
+async fn history(
+    State(remote): State<R>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(q): Query<RemoteHistoryQuery>,
+) -> Response {
+    let c = client(&remote, &headers, peer);
+    if authenticate(&remote, &c, &headers, true).is_err() {
+        return err(StatusCode::UNAUTHORIZED, "需要重新解锁");
+    }
+    if !tmuxide_tmux::valid_pane_id(&q.pane) {
+        return err(StatusCode::BAD_REQUEST, "面板 id 不合法");
+    }
+    let lines = crate::api::history_lines(&crate::api::HistoryQuery { lines: q.lines });
+    let tmux = remote.svc.tmux();
+    match tokio::task::spawn_blocking(move || tmux.history(&q.pane, lines)).await {
+        Ok(Ok(text)) => Json(json!({ "text": text })).into_response(),
+        Ok(Err(e)) => err(StatusCode::NOT_FOUND, &e.to_string()),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
 }
 
 async fn events(
