@@ -100,4 +100,4 @@ cd apps/desktop && pnpm install && pnpm tauri dev # 桌面版
 
 ## 第三方许可
 
-tmux (ISC) · libevent (BSD-3-Clause) · ncurses (MIT) · utf8proc (MIT) · libgit2 (GPL-2.0 with linking exception) · libssh2 (BSD-3-Clause) · OpenSSL (Apache-2.0) · cloudflared (Apache-2.0) · xterm.js (MIT) · Vue (MIT) · Tauri (MIT/Apache-2.0) · JetBrains Mono (OFL-1.1)
+tmux (ISC) · libevent (BSD-3-Clause) · ncurses (MIT) · utf8proc (MIT) · libgit2 (GPL-2.0 with linking exception) · libssh2 (BSD-3-Clause) · OpenSSL (Apache-2.0) · cloudflared (Apache-2.0) · xterm.js (MIT) · Vue (MIT) · Tauri (MIT/Apache-2.0) · JetBrains Mono (OFL-1.1) · Symbols Nerd Font (MIT)

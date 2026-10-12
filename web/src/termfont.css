@@ -1,0 +1,6 @@
+/* Nerd Font 图标（只含符号，MIT）：zsh/starship 等主题的提示符图标不会显示成方框 */
+@font-face {
+  font-family: 'Symbols Nerd Font Mono';
+  src: url('./assets/fonts/SymbolsNerdFontMono.woff2') format('woff2');
+  font-display: block;
+}

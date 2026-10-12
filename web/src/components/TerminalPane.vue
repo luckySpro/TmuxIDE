@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { attachUrl } from '../api'
+import { TERM_FONT, termFontReady } from '../termfont'
 import { state } from '../store'
 
 const props = defineProps<{ session: string }>()
@@ -39,7 +40,7 @@ function connect() {
 
 onMounted(() => {
   term = new Terminal({
-    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace",
+    fontFamily: TERM_FONT,
     fontSize: 13,
     lineHeight: 1.15,
     cursorBlink: true,
@@ -55,6 +56,7 @@ onMounted(() => {
   term.loadAddon(fit)
   term.loadAddon(new WebLinksAddon())
   term.open(host.value!)
+  termFontReady.then(() => term?.refresh(0, term.rows - 1))
   fit.fit()
   term.onData((data) => send({ type: 'input', data }))
   term.onResize(({ cols, rows }) => send({ type: 'resize', cols, rows }))

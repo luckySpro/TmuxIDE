@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { TERM_FONT, termFontReady } from '../termfont'
 import { api, wsUrl, type Me, type TermSession, type TermWindow } from './api'
 import { t } from './i18n'
 
@@ -114,7 +115,7 @@ function build() {
   const cols = current.value?.cols ?? 80
   const rows = current.value?.rows ?? 24
   term = new Terminal({
-    fontFamily: "'JetBrains Mono', ui-monospace, Menlo, monospace",
+    fontFamily: TERM_FONT,
     fontSize: fontSize.value || (fitPhone.value ? 12 : autoFont(cols, rows)),
     lineHeight: 1.1,
     cursorBlink: !props.readOnly,
@@ -134,6 +135,7 @@ function build() {
     term.loadAddon(fit)
   }
   term.open(host.value!)
+  termFontReady.then(() => term?.refresh(0, term.rows - 1))
   if (fit) {
     try { fit.fit() } catch { /* 容器尚未布局 */ }
   }

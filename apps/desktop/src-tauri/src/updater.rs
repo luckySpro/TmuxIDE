@@ -99,7 +99,38 @@ impl tmuxide_server::Installer for DesktopInstaller {
         if std::env::var_os("APPIMAGE").is_none() && !is_deb_install() {
             return Some("当前运行方式不支持自动升级，请下载新版安装包".into());
         }
-        None
+        #[cfg(target_os = "macos")]
+        let reason = macos_manual_reason();
+        #[cfg(not(target_os = "macos"))]
+        let reason = None;
+        reason
+    }
+}
+
+/// macOS：从隔离位置运行（App Translocation）或所在文件夹不可写时，升级插件无法替换应用
+#[cfg(target_os = "macos")]
+fn macos_manual_reason() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    if exe.to_string_lossy().contains("/AppTranslocation/") {
+        return Some(
+            "macOS 正在从临时隔离位置运行 TmuxIDE，无法自动升级。请退出 TmuxIDE，把它拖到“应用程序”文件夹，\
+             再在终端执行一次 xattr -dr com.apple.quarantine /Applications/TmuxIDE.app 后重新打开；之后就能自动升级。"
+                .into(),
+        );
+    }
+    // .../TmuxIDE.app/Contents/MacOS/tmuxide-desktop → TmuxIDE.app 所在的文件夹
+    let app = exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app"))?;
+    let dir = app.parent()?;
+    let probe = dir.join(format!(".tmuxide-write-test-{}", std::process::id()));
+    match std::fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            None
+        }
+        Err(_) => Some(format!(
+            "没有权限写入 {}，无法自动升级。请把 TmuxIDE 移到“应用程序”文件夹，或手动下载新版本",
+            dir.display()
+        )),
     }
 }
 
